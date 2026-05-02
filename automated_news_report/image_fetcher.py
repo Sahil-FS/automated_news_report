@@ -11,7 +11,7 @@ from ddgs import DDGS
 
 def generate_location_map(location: str, output_path: str) -> str | None:
     """
-    Generate a dark-themed static map with a red pin at the given location.
+    Generate a dark-themed static map with a red pin at the  given location.
     Uses staticmap + geopy (install: pip install staticmap geopy).
     Returns saved image path or None on failure.
     """

@@ -1,5 +1,5 @@
 # video_builder.py — 1080×1920 vertical video with styled visuals
-# Upgrades: bottom gradient, pill text card, branding bar
+# Upgrades: bottom gradient,  pill text card, branding bar
 
 import sys
 import os

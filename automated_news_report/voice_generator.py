@@ -86,7 +86,7 @@ def generate_audio(text: str, index: int) -> str | None:
 
     print(f"[VoiceGen] Generating audio for scene {index}: {text[:60]}…")
 
-    # Split text into sentence fragments
+    # Split text into sentence  fragments
     fragments = re.split(r'(?<=[.!?])\s+', text.strip())
     fragments = [f for f in fragments if f.strip()]
 

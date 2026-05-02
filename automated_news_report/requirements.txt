@@ -4,3 +4,4 @@ spacy
 numpy
 Pillow
 moviepy
+ollam 

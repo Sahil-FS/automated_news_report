@@ -7,7 +7,7 @@ from config import RSS_FEED_URL
 
 def fetch_latest_article(feed_url: str = RSS_FEED_URL) -> dict:
     """
-    Parse the RSS feed and return a dict with title, link, and summary
+    Parse the RSS feed and return a dict  with title, link, and summary
     for the most-recent entry.
 
     Returns:

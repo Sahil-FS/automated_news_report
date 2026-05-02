@@ -308,7 +308,7 @@ This repository builds a full local AI news-to-video generator that converts the
 - TTS model: `rhasspy/piper-voices` `en_US-lessac-medium.onnx`
 - NLP model: spaCy `en_core_web_sm`
 
-### What changed in this repo
+### What changed in  this repo
 
 - Added stronger script quality rules and validation in `script_generator.py`.
 - Added richer scene planning with entity extraction in `scene_planner.py`.

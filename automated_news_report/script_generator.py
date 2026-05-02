@@ -3,7 +3,7 @@
 #
 # Pipeline:
 #   clean → spaCy doc → detect_context → generate_hook (doc-driven)
-#   → build_story (scored body) → generate_ending → regulate word count
+#   → build_story (scored body) → generate_ending →  regulate word count
 
 import sys
 import subprocess

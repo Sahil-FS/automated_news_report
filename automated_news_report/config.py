@@ -11,7 +11,7 @@ IMAGE_DIR  = os.path.join(OUTPUT_DIR, "images")
 for d in (OUTPUT_DIR, AUDIO_DIR, IMAGE_DIR):
     os.makedirs(d, exist_ok=True)
 
-# ── News source ───────────────────────────────────────────────────────────────
+# ── News source ───────────────────────────────────────────────────────────
 RSS_FEED_URL = "https://feeds.bbci.co.uk/news/rss.xml"
 
 # ── Script generation ─────────────────────────────────────────────────────────

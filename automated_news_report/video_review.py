@@ -59,7 +59,7 @@ MAX_CAPTION_WORDS = 12   # words per scene before overflow risk
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# STEP 1 — Pre-flight checks
+# STEP 1 —  Pre-flight checks
 # ═════════════════════════════════════════════════════════════════════════════
 
 def preflight():

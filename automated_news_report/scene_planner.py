@@ -773,7 +773,7 @@ def plan_scenes(script: str) -> list[dict]:
         "within", "without", "along", "across", "behind", "toward",
         # articles
         "a", "an", "the",
-        # conjunctions / relative pronouns
+        # conjunctions / relative  pronouns
         "and", "or", "but", "so", "yet", "nor", "as", "that", "which",
         "when", "while", "where", "whether", "what", "who", "if",
         # auxiliary verbs

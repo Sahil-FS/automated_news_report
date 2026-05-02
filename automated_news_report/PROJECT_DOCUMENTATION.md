@@ -2953,4 +2953,4 @@ This **AI News-to-Video Generator** is a sophisticated, end-to-end automation pi
 
 ---
 
-*For questions or contributions, see: https://github.com/Sahil-FS/automated_news_report*
+*For questions or contributions,  see: https://github.com/Sahil-FS/automated_news_report*
