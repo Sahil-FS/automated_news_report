@@ -1,0 +1,6 @@
+ddgs
+feedparser
+spacy
+numpy
+Pillow
+moviepy
