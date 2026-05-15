@@ -2,6 +2,15 @@
 
 import os
 
+# Load .env file if present (for local development)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # python-dotenv not installed — use OS environment variables directly
+
+DEBUG_MODE = os.environ.get("DEBUG_MODE", "true").lower() == "true"
+
 # ── Paths ────────────────────────────────────────────────────────────────────
 BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = os.path.join(BASE_DIR, "output")

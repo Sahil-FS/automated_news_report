@@ -3,5 +3,12 @@ feedparser
 spacy
 numpy
 Pillow
-moviepy
-ollam 
+moviepy==1.0.3
+geopy
+beautifulsoup4
+requests
+urllib3
+kokoro>=0.9.4
+soundfile
+torch
+python-dotenv

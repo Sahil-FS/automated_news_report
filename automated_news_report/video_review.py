@@ -22,11 +22,9 @@ Usage:
 import sys
 
 # ENVIRONMENT CHECK
-if ".venv" not in sys.executable:
-    print("❌ ERROR: Not running in virtual environment (.venv)")
-    print(f"Current Python: {sys.executable}")
-    print("Please run: .venv\\Scripts\\python.exe video_review.py")
-    exit(1)
+import os as _os_env_check
+if "VIRTUAL_ENV" not in _os_env_check.environ and ".venv" not in sys.executable and "venv" not in sys.executable:
+    print(f"[WARN] Running outside a virtual environment: {sys.executable}")
 
 print(f"[ENV] Using Python: {sys.executable}")
 
@@ -231,16 +229,26 @@ def parse_stdout(lines: list, exit_code: int) -> ParsedRun:
             run.context = m.group(3).strip()
             break
 
-    # Scenes: "[ScenePlanner] Scene => type='...' | keyword='...' | TEXT..."
-    for line in lines:
-        m = re.search(r"\[ScenePlanner\] Scene => type='([^']+)' \| keyword='([^']+)' \| (.+?)\.{3}", line)
-        if m:
-            run.scenes.append({
-                "type":    m.group(1),
-                "keyword": m.group(2),
-                "text":    m.group(3).strip(),
-                "audio_dur": 0.0,
-            })
+    # Scenes: Read from scenes.json (more reliable than stdout parsing)
+    scenes_json_path = os.path.join(ROOT, "output", "scenes.json")
+    if os.path.isfile(scenes_json_path):
+        try:
+            import json as _json
+            with open(scenes_json_path, "r", encoding="utf-8") as _sf:
+                _raw_scenes = _json.load(_sf)
+            for _s in _raw_scenes:
+                run.scenes.append({
+                    "type":      _s.get("type", "general"),
+                    "keyword":   _s.get("keyword", ""),
+                    "text":      _s.get("text", ""),
+                    "audio_dur": 0.0,
+                    "has_image": bool(_s.get("image_path")),
+                })
+            print(f"[REVIEW] Loaded {len(run.scenes)} scenes from scenes.json")
+        except Exception as _je:
+            print(f"[REVIEW] scenes.json load failed: {_je}")
+    else:
+        print("[REVIEW] scenes.json not found — scene metrics will be limited")
 
     # Audio: "[VoiceGen] Audio saved -> .../scene_XX_HASH.wav" or Cache hit
     audio_saved = {}

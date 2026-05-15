@@ -1341,15 +1341,16 @@ Duration: 51.2 seconds (target: 45–55s)
 
 ## Complete Pipeline Walkthrough
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────┐
-│ INPUT: BBC News RSS Feed                                    │
-│ https://feeds.bbci.co.uk/news/rss.xml                       │
+│ INPUT: 8 News RSS Feeds (BBC, Sky, DW, etc.)                │
+│ (Scored and selected automatically)                         │
 └──────────────────────┬──────────────────────────────────────┘
                        ↓
         ┌──────────────────────────────┐
         │  1. NEWS FETCHER             │
         │  news_fetcher.py             │
+        │  (feedparser + bs4)          │
         └──────────────────────────────┘
                        ↓
         ┌──────────────────────────────────────┐
@@ -1364,7 +1365,7 @@ Duration: 51.2 seconds (target: 45–55s)
         ┌──────────────────────────────┐
         │  2. SCRIPT GENERATOR         │
         │  script_generator.py         │
-        │  (spaCy NLP + context)       │
+        │  (Ollama Llama3 + regex filter)│
         └──────────────────────────────┘
                        ↓
         ┌────────────────────────────────────────────┐
@@ -1377,7 +1378,7 @@ Duration: 51.2 seconds (target: 45–55s)
         ┌──────────────────────────────┐
         │  3. SCENE PLANNER            │
         │  scene_planner.py            │
-        │  (NER extraction, chunking)   │
+        │  (NER extraction, chunking)  │
         └──────────────────────────────┘
                        ↓
         ┌──────────────────────────────────────┐
@@ -1397,10 +1398,10 @@ Duration: 51.2 seconds (target: 45–55s)
    └──────────────┘  └──────────────┘  └──────────────┘
          ↓                  ↓                  ↓
     ┌─────────────┐   ┌──────────┐      ┌──────────┐
-    │ Pexels API  │   │ Piper    │      │ Keyword, │
-    │   (call)    │   │   TTS    │      │  Type    │
-    │      ↓      │   │  (local) │      │          │
-    │Wikipedia    │   │    ↓     │      │          │
+    │ DuckDuckGo  │   │ Kokoro   │      │ Keyword, │
+    │   (Primary) │   │   TTS    │      │  Type,   │
+    │      ↓      │   │ (local)  │      │ NER data │
+    │ Pexels/Wiki │   │    ↓     │      │          │
     │ (fallback)  │   │ scene_XX │      │          │
     │      ↓      │   │ _HASH    │      │          │
     │ Dark fill   │   │ .wav     │      │          │
@@ -1637,6 +1638,13 @@ video_review.py
                                                            │  news_video.mp4   │
                                                            └──────────────────┘
 ```
+
+---
+
+# Recent Updates
+- `script_generator.py` was updated to use `llama3` as the Ollama model candidate instead of `qwen3.5:cloud`.
+- The Ollama command now points to the local Windows executable at `C:\Users\Darshan\AppData\Local\Programs\Ollama\ollama.exe`.
+- These notes are added so the project documentation matches the current repository state.
 
 ## Function Call Chain
 

@@ -4,19 +4,19 @@ Automatically converts the latest BBC news into a short, vertical (1080×1920)
 video suitable for TikTok / Instagram Reels / YouTube Shorts — using only free,
 local tools.
 
-```
-Latest BBC RSS feed
+```text
+Multiple RSS Feeds (BBC, Sky, DW, etc.)
        ↓
-  feedparser  →  title + summary
+  feedparser & bs4 → Headline Scoring & Selection
        ↓
-   spaCy NLP  →  extractive summary (top-5 sentences)
+   Ollama (Llama3) → News-style script generation & formatting
        ↓
-  scene planner →  [text, keyword] × N
+  scene planner   → Scenes + NER context + Map Geocoding
        ↓
- Wikimedia API  →  one image per scene
-  Piper TTS     →  one WAV per scene
+  DuckDuckGo/Pexels/Wiki → Primary & Alt image per scene (w/ clipart filter)
+  Kokoro TTS      → One WAV narration per scene (fallback to Piper)
        ↓
-   MoviePy     →  1080×1920 MP4
+   MoviePy        → 1080×1920 MP4 (Visual cuts, captions, dynamic outro)
 ```
 
 ---
@@ -60,11 +60,12 @@ pip install -r requirements.txt
 
 This will install:
 - `ddgs` (DuckDuckGo search for image fetching)
-- `feedparser` (for RSS feed parsing)
-- `spacy` (for natural language processing)
-- `numpy` (for numerical operations)
-- `Pillow` (for image processing)
-- `moviepy` (for video creation)
+- `feedparser` & `beautifulsoup4` (for RSS parsing and web scraping)
+- `spacy` (for NLP and Named Entity Recognition)
+- `numpy` & `Pillow` (for data array handling and image processing)
+- `moviepy` (for video rendering)
+- `geopy` (for map stinger generation)
+- `kokoro`, `soundfile`, `torch` (for high-quality neural TTS generation)
 
 > **MoviePy ≥ 1.0.3** is required. If `pip install moviepy` installs v2,
 > pin it:  `pip install "moviepy==1.0.3"`
@@ -86,9 +87,20 @@ Ollama is used to generate news scripts using local AI models.
    ```
 3. Ensure Ollama is running in the background.
 
-### Step 4 — Piper TTS (local, offline)
+### Step 4 — Kokoro TTS & espeak-ng (Primary Voice Engine)
 
-Piper is a fast, local neural TTS engine from Rhasspy.
+Kokoro is a high-quality, lightweight neural TTS engine running locally.
+
+1. Install system prerequisites (Windows):
+   ```powershell
+   winget install espeak-ng
+   ```
+2. The python packages (`kokoro` and `soundfile`) are included in `requirements.txt`.
+3. The pipeline will automatically download the required `hexgrad/Kokoro-82M` voice model on first run.
+
+### Step 5 — Piper TTS (Offline Fallback Engine)
+
+Piper is used as a fast, offline fallback if Kokoro is unavailable.
 
 #### a) Download the Piper binary
 
@@ -206,41 +218,29 @@ python modules/video_builder.py
 
 ---
 
-## How It Works
+### 1 · News Fetcher (`feedparser` & `bs4`)
+Parses multiple RSS feeds (BBC, Sky, DW, AlJazeera, NDTV, Times of India) and scores headlines. Selects the most relevant article and extracts content.
 
-### 1 · News Fetcher (`feedparser`)
-Parses the BBC RSS feed and extracts the `title`, `link`, and `summary` of
-the first entry.
-
-### 2 · Script Generator (`spaCy` + `heapq`)
-Extractive summarisation in three steps:
-1. Tokenise with spaCy; count non-stopword tokens → normalised frequency table.
-2. Score each sentence by summing the frequencies of its tokens.
-3. Use `heapq.nlargest` to select the top-N sentences; return them in original
-   document order.
+### 2 · Script Generator (`Ollama Llama3` + `spaCy`)
+Uses a local LLM (Llama3 via Ollama) to rewrite the news content into a professional, engaging news script. Uses regex filtering to scrub LLM meta-commentary and trims orphan fragments.
 
 ### 3 · Scene Planner (`spaCy`)
-Splits the summary into one sentence = one scene.  For each sentence, extracts
-a keyword by priority: named entity → proper noun → common noun → any token.
+Splits the script into scenes. Extracts context, named entities (NER), geographic locations, and scene types (war, politics, tech). Geocodes locations for map stinger generation.
 
-### 4 · Image Fetcher (Wikimedia Commons API)
-Queries `https://en.wikipedia.org/w/api.php?action=query&prop=pageimages…` for
-each keyword and downloads the `original` image.  Falls back to a blank dark
-clip if the API returns nothing.
+### 4 · Image Fetcher (DuckDuckGo / Pexels / Wiki)
+Fetches realistic news photos via DuckDuckGo (Primary) or Unsplash/Pexels/Wikipedia. Applies strict anti-clipart/toy filters to maintain journalistic integrity. Fetches alt images for mid-scene visual cuts.
 
-### 5 · Voice Generator (`subprocess` + Piper)
-Pipes the scene text to the Piper binary:
-```
-echo "text" | piper --model <onnx> --output_file scene.wav
-```
-Returns the WAV path, or `None` if Piper is not installed.
+### 5 · Voice Generator (Kokoro TTS / Piper)
+Generates high-quality narration using Kokoro TTS (with a numpy 2.x patch applied for safety). If Kokoro is missing, gracefully falls back to local Piper TTS.
 
 ### 6 · Video Builder (`MoviePy`)
 For each scene:
-* Load background image → `resize(height=1920)` → `crop(x_center, 1080×1920)`.
-* Apply 60 % dark overlay (`ColorClip + set_opacity`).
-* Render wrapped text (≤ 2 lines) centred with drop-shadow using Pillow.
-* Attach WAV audio; duration = audio length (or 5 s fallback).
+* Adds geographic map stingers for location context.
+* Loads background images → resizes to 1080×1920 with Ken Burns zoom effects.
+* Applies visual cuts midway through longer scenes.
+* Renders synchronized captions.
+* Attaches generated WAV audio.
+* Appends a dynamically calculated animated outro scene.
 
 All scenes are concatenated and exported as `libx264` / `aac` MP4.
 
@@ -255,6 +255,13 @@ All scenes are concatenated and exported as `libx264` / `aac` MP4.
 | `ffmpeg not found` | Install ffmpeg and ensure it is on `PATH` |
 | Black video, no images | Wikimedia API may rate-limit; the blank fallback is used automatically |
 | `moviepy` import error | Pin version: `pip install "moviepy==1.0.3"` |
+
+---
+
+## Recent Updates
+- Updated `script_generator.py` to use `llama3` as the Ollama model candidate instead of `qwen3.5:cloud`.
+- Confirmed the Ollama executable uses the Windows path `C:\Users\Darshan\AppData\Local\Programs\Ollama\ollama.exe`.
+- These changes were added to reflect the current local environment and model setup.
 
 ---
 
@@ -308,15 +315,19 @@ This repository builds a full local AI news-to-video generator that converts the
 - TTS model: `rhasspy/piper-voices` `en_US-lessac-medium.onnx`
 - NLP model: spaCy `en_core_web_sm`
 
-### What changed in  this repo
+### What changed in this repo
 
-- Added stronger script quality rules and validation in `script_generator.py`.
-- Added richer scene planning with entity extraction in `scene_planner.py`.
-- Added semantic and type-aware image query generation in `image_fetcher.py`.
-- Added optional location map stinger generation for stories with geographic entities.
+- Added multi-feed headline scoring replacing static single-feed fetching in `news_fetcher.py`.
+- Replaced basic extractive summarization with direct Ollama (Llama3) script generation in `script_generator.py`.
+- Implemented robust regex stripping of LLM meta-commentary (e.g. "Here is the script:") and removed orphan caption fragments ("civilians", "buildings").
+- Added semantic and type-aware image query generation in `image_fetcher.py`, utilizing DuckDuckGo, Unsplash, Pexels, and Wikipedia.
+- Implemented strict anti-clipart and toy filter rejection logic to ensure photojournalistic realism.
+- Added visual cuts (B-roll) for longer scenes and dynamic Ken Burns zoom effects.
+- Added location map stinger generation for stories with geographic entities.
+- Upgraded primary TTS to Kokoro (`hexgrad/Kokoro-82M`) with a custom fallback to Piper TTS. Fixed numpy 2.x audio concatenation bugs.
+- Implemented dynamic outro duration calculation bound to the exact length of the outro narration WAV.
 - Added strict `.venv` checks in core modules to ensure the right environment is used.
 - Added `video_review.py` to validate end-to-end pipeline execution and video duration.
-- Improved `video_builder.py` styling with a gradient overlay, text card, branding bar, and fallback image handling.
 
 ### Output structure
 
