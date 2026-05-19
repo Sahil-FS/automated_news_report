@@ -59,6 +59,14 @@ def distribute_word_timings(words, total_duration):
     if total_new > 0:
         durations = durations * (total_duration / total_new)
 
+    # RE-APPLY FLOOR after normalization â€” normalization can push short words below 0.10s
+    durations = np.maximum(durations, 0.08)   # 80ms absolute minimum after normalization
+
+    # Final re-normalize to restore total_duration after floor re-application
+    total_final = durations.sum()
+    if total_final > 0 and total_final != total_duration:
+        durations = durations * (total_duration / total_final)
+
     # Build raw (start, end) pairs
     raw_timings = []
     current = 0.0
@@ -96,6 +104,9 @@ from config import (
     VIDEO_FPS,
     SCENE_DURATION,
     OUTPUT_VIDEO,
+    MAP_STINGER_DURATION,
+    MAP_STINGER_MAX,
+    MAP_STINGER_MIN,
 )
  
 
@@ -165,6 +176,26 @@ def _make_background(image_path: str | None, W: int, H: int) -> np.ndarray:
 
         except Exception as exc:
             print(f"[VideoBuilder] Image load failed: {exc}")
+            try:
+                import time as _retry_time
+                _retry_time.sleep(0.1)
+                img = Image.open(image_path).convert("RGB")
+
+                scale = max(H / img.height, W / img.width)
+                new_w = max(int(img.width  * scale), W)
+                new_h = max(int(img.height * scale), H)
+                img   = img.resize((new_w, new_h), Image.LANCZOS)
+                left  = (new_w - W) // 2
+                top   = (new_h - H) // 2
+                img   = img.crop((left, top, left + W, top + H))
+                img   = img.filter(ImageFilter.GaussianBlur(radius=0.8))
+
+                arr = np.array(img)
+                _last_valid_bg_arr = arr
+                print(f"[VideoBuilder] Image retry succeeded: {image_path}")
+                return arr
+            except Exception:
+                pass
 
     # -- High-contrast blur-safety-net ---------------------------------
     # Problem: raw GaussianBlur on bright frames causes white smears
@@ -172,7 +203,7 @@ def _make_background(image_path: str | None, W: int, H: int) -> np.ndarray:
     # Fix: composite the blurred frame at 50% opacity over a solid
     # dark-navy canvas (#0d1117) to guarantee caption contrast.
     if _last_valid_bg_arr is not None:
-        print("[BG] No image — using blurred previous frame")
+        print("[BG] No image -- using blurred previous frame")
 
         DARK_NAVY = (13, 17, 23)   # hex #0d1117
 
@@ -198,9 +229,9 @@ def _make_background(image_path: str | None, W: int, H: int) -> np.ndarray:
         return np.array(result)
 
     # -- Hard fallback - only if no frame has ever been loaded ---------
-    print("[BG] No image — using dark fill")
+    print("[BG] No image and no prior frame -- using dark blue fallback")
     base = np.zeros((H, W, 3), dtype=np.uint8)
-    base[:, :] = [22, 28, 40]
+    base[:, :] = [15, 35, 65]
     return base
  
  
@@ -458,8 +489,8 @@ def _make_progressive_caption(text, timing_duration, W, H, clip_duration=None):
             word_index = total_words - 1
 
         # PHASE 12: After voice ends, HOLD the final complete caption frame
-        # This is intentional — viewer can still read while scene fades out
-        # Never return transparent here — that causes a visual pop/flicker
+        # This is intentional -- viewer can still read while scene fades out
+        # Never return transparent here -- that causes a visual pop/flicker
         if t > timings[-1][1]:
             _hold_key = "__HOLD__"
             if _hold_key in _frame_cache:
@@ -489,7 +520,9 @@ def _make_progressive_caption(text, timing_duration, W, H, clip_duration=None):
         _frame_cache[word_index] = frame
         return frame
  
-    clip = VideoClip(make_frame, duration=clip_duration)
+    # PHASE 20: Caption Clip Duration Minimum Guard
+    _safe_duration = max(clip_duration, timing_duration)
+    clip = VideoClip(make_frame, duration=_safe_duration)
     clip.fps = VIDEO_FPS
 
     return clip
@@ -664,7 +697,7 @@ def _generate_whoosh(duration: float = 0.18) -> np.ndarray | None:
  
         # Amplitude envelope: fast attack, rapid exponential decay
         envelope = np.exp(-t * 18.0)
-        wave = wave * envelope * 0.04   # 4% volume — barely audible, professional
+        wave = wave * envelope * 0.04   # 4% volume -- barely audible, professional
  
         # Stereo
         stereo = np.stack([wave, wave], axis=1).astype(np.float32)
@@ -695,9 +728,16 @@ def _apply_ken_burns(bg_arr, clip_duration):
  
     resample_method = getattr(Image, 'Resampling', Image).LANCZOS if hasattr(Image, 'Resampling') else getattr(Image, 'ANTIALIAS', 1)
  
+    fps = 24
+    _cache = {}
+
     def make_zoom_frame(t):
+        frame_idx = int(round(t * fps))
+        if frame_idx in _cache:
+            return _cache[frame_idx]
+
         t_safe = max(0.0, min(float(t), float(clip_duration)))
-        scale = 1.0 + 0.05 * (t_safe / max(1.0, clip_duration))
+        scale = 1.0 + 0.15 * (t_safe / max(1.0, clip_duration))
  
         new_w = int(w / scale)
         new_h = int(h / scale)
@@ -706,9 +746,13 @@ def _apply_ken_burns(bg_arr, clip_duration):
  
         cropped = bg_arr[y1:y1+new_h, x1:x1+new_w]
         pil_img = Image.fromarray(cropped)
-        return np.array(pil_img.resize((w, h), resample_method))
+        res = np.array(pil_img.resize((w, h), resample_method))
+        _cache[frame_idx] = res
+        return res
  
-    return VideoClip(make_zoom_frame, duration=clip_duration)
+    clip = VideoClip(make_zoom_frame, duration=clip_duration)
+    clip.fps = fps
+    return clip
  
  
 def _build_scene_clip(
@@ -724,6 +768,14 @@ def _build_scene_clip(
     alt_image_path: str | None = None,
 ) -> CompositeVideoClip:
     W, H = VIDEO_WIDTH, VIDEO_HEIGHT
+
+    _effective_image_path = image_path
+    if not _effective_image_path or not os.path.isfile(_effective_image_path):
+        _placeholder = os.path.join(os.path.dirname(OUTPUT_VIDEO), "..", "assets", "placeholder.jpg")
+        _placeholder = os.path.abspath(_placeholder)
+        if os.path.isfile(_placeholder):
+            _effective_image_path = _placeholder
+            print(f"[SCENE {scene_idx:02d}] Using placeholder image (no image found)")
  
     # PHASE 12: Capture PURE voice duration FIRST before any mixing
     _pure_voice_duration = 0.0   # this is what caption timing must match
@@ -731,7 +783,7 @@ def _build_scene_clip(
     if audio_path and os.path.isfile(audio_path):
         audio_clip = AudioFileClip(audio_path)
         _pure_voice_duration = audio_clip.duration   # pure voice, saved before any mixing
-        # PHASE 13: 0.30s buffer (reduced from 0.50) — prevents clipping without dead air
+        # PHASE 13: 0.30s buffer (reduced from 0.50) -- prevents clipping without dead air
         duration = audio_clip.duration + 0.30
  
         # -- Whoosh SFX prepend --------------------------------------------
@@ -756,24 +808,24 @@ def _build_scene_clip(
     duration = final_duration  # keep final_duration as master (already includes buffer via build_video)
   
     def make_frame(_t):
-        return _make_background(image_path, W, H)
+        return _make_background(_effective_image_path, W, H)
   
     # -- 2.5s Visual Cut Rule ---------------------------------------------
     # If scene is longer than 2.8s, split into two visual sub-clips
     # with different images. Audio plays continuously.
     CUT_THRESHOLD = 2.8  # seconds
  
-    if duration > CUT_THRESHOLD and image_path:
+    if duration > CUT_THRESHOLD and _effective_image_path:
         cut_point = duration / 2  # cut at midpoint
  
         # Primary image - first half
-        bg_arr_a = _make_background(image_path, W, H)
+        bg_arr_a = _make_background(_effective_image_path, W, H)
         bg_a = _apply_ken_burns(bg_arr_a, cut_point)
  
         # Fetch a second image for the visual cut second half
         # Build background for second half
         bg_arr_b = _make_background(
-            alt_image_path if alt_image_path else image_path, W, H
+            alt_image_path if alt_image_path else _effective_image_path, W, H
         )
         bg_b = _apply_ken_burns(bg_arr_b, duration - cut_point)
  
@@ -782,16 +834,16 @@ def _build_scene_clip(
  
     else:
         # Short scene - single image with Ken Burns zoom
-        bg_arr = _make_background(image_path, W, H)
+        bg_arr = _make_background(_effective_image_path, W, H)
         bg = _apply_ken_burns(bg_arr, duration)
  
     # Anti-black screen: if image failed to load, use fallback
-    if image_path is None or not os.path.exists(image_path):
-        fallback_path = os.path.join(os.path.dirname(image_path or os.path.join(os.getcwd(), "output", "images")), "fallback.jpg")
+    if _effective_image_path is None or not os.path.exists(_effective_image_path):
+        fallback_path = os.path.join(os.path.dirname(_effective_image_path or os.path.join(os.getcwd(), "output", "images")), "fallback.jpg")
         if os.path.exists(fallback_path):
             print(f"[ANTI-BLACK] Using fallback image: {fallback_path}")
-            image_path = fallback_path
-            bg_arr = _make_background(image_path, W, H)
+            _effective_image_path = fallback_path
+            bg_arr = _make_background(_effective_image_path, W, H)
             bg = _apply_ken_burns(bg_arr, duration)
   
     # Layer 2 - gradient
@@ -808,13 +860,20 @@ def _build_scene_clip(
         # No audio: estimate from word count at natural speech rate
         _pure_voice_duration = max(1.5, len(text.split()) / 2.5)
 
+    # PHASE 16: Guard against clip_duration < timing_duration (causes caption cutoff)
+    # This happens when audio was compressed to fit MAX_SCENE_TOTAL
+    _caption_timing = _pure_voice_duration
+    _caption_clip_dur = max(duration, _pure_voice_duration)
+
     caption_clip = _make_progressive_caption(
         text,
-        timing_duration=_pure_voice_duration,   # PURE VOICE — exact match
+        timing_duration=_caption_timing,
         W=W, H=H,
-        clip_duration=duration                  # clip lives for full scene
+        clip_duration=_caption_clip_dur
     )
-    print(f"[CAPTION SYNC] voice={_pure_voice_duration:.2f}s | scene={duration:.2f}s | lag=0")
+    _sync_status = "OK" if _caption_clip_dur >= _caption_timing else "CLIPPED"
+    print(f"[CAPTION SYNC] voice={_caption_timing:.2f}s | "
+          f"scene={duration:.2f}s | clip={_caption_clip_dur:.2f}s | {_sync_status}")
   
     # Layer 4 - Lower third (all scenes)
     lower_arr = _make_lower_third(headline, news_source, location, W, H)
@@ -857,7 +916,7 @@ def _build_scene_clip(
     print(
         f"[VideoBuilder] Scene {scene_idx:02d} - {duration:.1f}s | "
         f"audio={'Y' if audio_clip else 'N'} | "
-        f"image={'Y' if image_path else 'N'}"
+        f"image={'Y' if _effective_image_path else 'N'}"
     )
     return scene
  
@@ -904,7 +963,7 @@ def _fetch_second_image(scene: dict, index: int) -> str | None:
     return None
  
  
-def _generate_outro_audio(cta: dict = None) -> str | None:
+def _generate_outro_audio(cta: dict = None, story_context: str = "neutral") -> str | None:
     """
     Generate short Piper TTS for the outro screen.
     Kept under 3s so the outro stays at 4s total.
@@ -925,7 +984,9 @@ def _generate_outro_audio(cta: dict = None) -> str | None:
             outro_text = "Subscribe for daily news updates."
 
         print(f"[OUTRO AUDIO] Speaking: '{outro_text}'")
-        return generate_audio(outro_text, index=998)
+        # PHASE 16: Use story_context so outro voice matches main narration
+        print(f"[OUTRO AUDIO] Context: '{story_context}' (matches main narration)")
+        return generate_audio(outro_text, index=998, context=story_context)
     except Exception as exc:
         print(f"[OUTRO AUDIO] TTS failed: {exc}")
         return None
@@ -963,8 +1024,8 @@ def _build_outro_scene(
 
     W, H = VIDEO_WIDTH, VIDEO_HEIGHT
 
-    # ── Dynamic Duration Control ───────────────────────────────────────
-    # Read duration from the OUTRO audio file itself — not from the
+    # â”€â”€ Dynamic Duration Control â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # Read duration from the OUTRO audio file itself -- not from the
     # total video audio_duration parameter which is the full video length.
     OUTRO_MIN = 2.5
     OUTRO_MAX = 9.5
@@ -1017,7 +1078,7 @@ def _build_outro_scene(
             except Exception as exc:
                 print(f"[OUTRO BG] Scene0 image failed: {exc} - using gradient")
 
-        # ── Original dark gradient fallback ──────────────────────────────
+        # â”€â”€ Original dark gradient fallback â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         canvas = Image.new("RGB", (1080, 1920), DARK_NAVY)
         draw   = ImageDraw.Draw(canvas)
         for y in range(1920):
@@ -1097,7 +1158,7 @@ def _build_outro_scene(
 
         # Main headline
         # PHASE 13: Word-wrap the main CTA text to prevent clipping
-        font_size = 46    # reduced from 52 — safer default
+        font_size = 46    # reduced from 52 -- safer default
         if len(main_line) > 60:
             font_size = 36
         elif len(main_line) > 45:
@@ -1121,7 +1182,7 @@ def _build_outro_scene(
 
         # Check if text fits on one line
         if _txt_w(main_text) <= SAFE_W:
-            # Single line — center normally
+            # Single line -- center normally
             mw = _txt_w(main_text)
             draw.text(((W - mw) // 2, int(H * 0.54)),
                       main_text, font=font_main,
@@ -1222,20 +1283,29 @@ def _build_outro_scene(
     # Animated subscribe button - fades in from t=1.5s over 0.8s
     FADE_START = 1.5
     FADE_DUR   = 0.8
- 
+
     def make_subscribe_frame(t):
+        # Returns 3-channel RGB array
+        btn_rgba = _make_subscribe_btn(1.0)  # always fully opaque RGB base
+        return btn_rgba[:, :, :3]
+
+    def make_subscribe_mask(t):
+        # Returns 1-channel float array (0.0 to 1.0) for transparency fade
         if t < FADE_START:
             alpha = 0.0
         elif t < FADE_START + FADE_DUR:
             alpha = (t - FADE_START) / FADE_DUR
         else:
             alpha = 1.0
-        return _make_subscribe_btn(alpha)
- 
-    subscribe_clip = VideoClip()
-    subscribe_clip.frame_function = make_subscribe_frame
-    subscribe_clip.duration = duration
-    subscribe_clip.size = (W, H)
+        
+        # Extract the alpha channel from fully opaque base and multiply by fade progress
+        btn_rgba = _make_subscribe_btn(1.0)
+        alpha_channel = btn_rgba[:, :, 3] / 255.0
+        return alpha_channel * alpha
+
+    subscribe_clip = VideoClip(make_subscribe_frame, duration=duration)
+    subscribe_mask = VideoClip(make_subscribe_mask, is_mask=True, duration=duration)
+    subscribe_clip = subscribe_clip.with_mask(subscribe_mask)
  
     if audio_path and os.path.isfile(audio_path) and _outro_audio is None:
         _outro_audio = AudioFileClip(audio_path)
@@ -1252,7 +1322,7 @@ def _build_outro_scene(
     if _outro_audio:
         outro = outro.with_audio(_outro_audio)
  
-    print(f"[OUTRO] Built outro scene - {duration}s | "
+    print(f"[OUTRO] Built outro scene - {duration:.2f}s | "
           f"audio={'Y' if _outro_audio else 'N'}")
     return outro
  
@@ -1325,14 +1395,14 @@ def _generate_ambient_tone(duration: float, output_path: str) -> str | None:
 def _generate_news_music(duration: float, context: str, output_path: str) -> str | None:
     """
     Generate context-appropriate background music using ffmpeg.
-    PHASE 13: Simplified filter chain — reliable at all durations.
+    PHASE 13: Simplified filter chain -- reliable at all durations.
     """
     import subprocess
     import shutil
     import os
 
     if not shutil.which("ffmpeg"):
-        print("[MUSIC] ffmpeg not found — skipping")
+        print("[MUSIC] ffmpeg not found -- skipping")
         return None
 
     # Map context to frequency pairs (bass, harmony) and master volume
@@ -1349,8 +1419,8 @@ def _generate_news_music(duration: float, context: str, output_path: str) -> str
     }
     f1, f2, vol = PROFILES.get(context, PROFILES["neutral"])
 
-    # PHASE 13: Simple reliable filter — two sine waves mixed, faded in/out
-    # No concat, no ident burst — just clean ambient bed
+    # PHASE 13: Simple reliable filter -- two sine waves mixed, faded in/out
+    # No concat, no ident burst -- just clean ambient bed
     fade_in  = 1.5
     fade_out_start = max(duration - 2.5, duration * 0.80)
     fade_out = 2.0
@@ -1371,7 +1441,7 @@ def _generate_news_music(duration: float, context: str, output_path: str) -> str
         "-ar", "44100",
         "-ac", "2",
         "-acodec", "libmp3lame",
-        "-b:a", "96k",             # fixed bitrate — more predictable than -q:a
+        "-b:a", "96k",             # fixed bitrate -- more predictable than -q:a
         output_path,
     ]
 
@@ -1379,13 +1449,13 @@ def _generate_news_music(duration: float, context: str, output_path: str) -> str
         result = subprocess.run(cmd, capture_output=True, timeout=60)
         if result.returncode == 0 and os.path.isfile(output_path):
             size_kb = os.path.getsize(output_path) // 1024
-            # Validate: at 96kbps, 1s ≈ 12KB. File should be >= duration*8 KB
+            # Validate: at 96kbps, 1s â‰ˆ 12KB. File should be >= duration*8 KB
             expected_min_kb = int(duration * 8)
             if size_kb < expected_min_kb:
-                print(f"[MUSIC] ⚠️  File too small ({size_kb}KB for {duration:.1f}s) "
-                      f"— expected ≥{expected_min_kb}KB. Music may be truncated.")
+                print(f"[MUSIC] WARNING:ï¸  File too small ({size_kb}KB for {duration:.1f}s) "
+                      f"-- expected â‰¥{expected_min_kb}KB. Music may be truncated.")
             else:
-                print(f"[MUSIC] Generated {context} music: {size_kb}KB, {duration:.1f}s ✓")
+                print(f"[MUSIC] Generated {context} music: {size_kb}KB, {duration:.1f}s OK")
             return output_path
         stderr = result.stderr.decode("utf-8", errors="replace")[-300:]
         print(f"[MUSIC] ffmpeg failed (rc={result.returncode}): {stderr}")
@@ -1400,14 +1470,52 @@ def _build_map_stinger(
     map_image_path: str,
     location: str,
     headline: str,
+    hook_text: str = "",               # PHASE 22: hook narration sentence for progressive captions
     audio_path: str = None,
-    duration: float = 2.5,
+    duration: float = MAP_STINGER_DURATION,   # default; overridden by hook audio when available
 ) -> CompositeVideoClip:
-    """2.5s opening map scene with location pin and headline text."""
+    """Opening map scene with location pin and headline text. Duration matches hook audio."""
     W, H = VIDEO_WIDTH, VIDEO_HEIGHT
+
+    MAP_MAX_DURATION = MAP_STINGER_MAX
+    MAP_MIN_DURATION = MAP_STINGER_MIN
+    _map_audio = None
+    _actual_audio_dur = 0.0
+
+    if audio_path and os.path.isfile(audio_path):
+        _map_audio = AudioFileClip(audio_path)
+        _actual_audio_dur = _map_audio.duration
+        duration = min(MAP_MAX_DURATION, max(MAP_MIN_DURATION, _actual_audio_dur + 0.4))
+        print(f"[MAP STINGER] Audio={_actual_audio_dur:.2f}s -> clip={duration:.2f}s")
+    else:
+        duration = max(MAP_MIN_DURATION, min(duration, MAP_MAX_DURATION))
  
     bg_arr = _make_background(map_image_path, W, H)
-    bg = ImageClip(bg_arr).with_duration(duration)
+
+    _map_frames = []
+    _map_total = max(1, int(round(duration * VIDEO_FPS)))
+    _map_resample = getattr(getattr(Image, "Resampling", Image), "LANCZOS", 1)
+
+    print(f"[MAP ANIMATION] Pre-rendering {_map_total} frames ({duration:.1f}s)...")
+    _h, _w = bg_arr.shape[:2]
+    for _fi in range(_map_total):
+        _t_norm = _fi / max(1, _map_total - 1)
+        _scale = 1.0 + 0.15 * _t_norm
+        _nw = max(1, int(_w / _scale))
+        _nh = max(1, int(_h / _scale))
+        _x1 = (_w - _nw) // 2
+        _y1 = (_h - _nh) // 2
+        _cropped = bg_arr[_y1:_y1 + _nh, _x1:_x1 + _nw]
+        _frame = np.array(Image.fromarray(_cropped).resize((_w, _h), _map_resample))
+        _map_frames.append(_frame)
+
+    def _map_zoom_frame(t):
+        _fi = min(int(round(t * VIDEO_FPS)), len(_map_frames) - 1)
+        return _map_frames[_fi]
+
+    bg = VideoClip(_map_zoom_frame, duration=duration)
+    bg.fps = VIDEO_FPS
+    print("[MAP ANIMATION] Pre-render complete")
  
     grad_arr  = _make_gradient_overlay(W, H)
     grad_clip = ImageClip(grad_arr).with_duration(duration)
@@ -1424,7 +1532,7 @@ def _build_map_stinger(
             lw, lh = draw.textsize(loc_label, font=font_loc)
         px, py = 50, 30
         lx = (W - lw) // 2
-        ly = int(H * 0.72)
+        ly = int(H * 0.55)
         draw.rounded_rectangle(
             [(lx-px, ly-py), (lx+lw+px, ly+lh+py)],
             radius=18, fill=(*ACCENT_COLOR, 220)
@@ -1452,18 +1560,29 @@ def _build_map_stinger(
  
     text_clip   = ImageClip(_make_map_text()).with_duration(duration)
     banner_clip = ImageClip(_make_breaking_news_banner(W, H)).with_duration(duration)
- 
-    MAP_MAX_DURATION = 5.0   # hard cap
-    if audio_path and os.path.isfile(audio_path):
-        _map_audio = AudioFileClip(audio_path)
-        duration   = min(MAP_MAX_DURATION,
-                         _map_audio.duration + 0.3)
-    else:
-        _map_audio = None
-        duration = min(duration, MAP_MAX_DURATION)
- 
+    _pure_map_narr_dur = _actual_audio_dur if _actual_audio_dur > 0 else max(1.0, duration - 0.5)
+
+    # PHASE 22: Progressive caption for hook narration (same system as all other scenes)
+    map_caption_clip = None
+    if hook_text and hook_text.strip():
+        _hook_timing = max(1.0, _pure_map_narr_dur - 0.12)  # subtract 120ms lead silence
+        _caption_clip_dur = duration
+
+        map_caption_clip = _make_progressive_caption(
+            hook_text,
+            timing_duration=_hook_timing,
+            W=W, H=H,
+            clip_duration=_caption_clip_dur,
+        )
+        print(f"[MAP CAPTION] hook_timing={_hook_timing:.2f}s, clip={_caption_clip_dur:.2f}s")
+
+    _map_layers = [bg.with_position("center"), grad_clip, text_clip]
+    if map_caption_clip is not None:
+        _map_layers.append(map_caption_clip)   # caption before banner so it's visible
+    _map_layers.append(banner_clip)
+
     stinger = CompositeVideoClip(
-        [bg.with_position("center"), grad_clip, text_clip, banner_clip],
+        _map_layers,
         size=(W, H)
     ).with_duration(duration)
  
@@ -1492,33 +1611,73 @@ def build_video(scenes: list[dict], pipeline_meta: dict = None) -> str:
             audio_clip.close()
         else:
             duration = len(words) * 0.6
-        duration = max(2.5, min(duration, 7.5))
+        duration = max(2.0, min(duration, 9.5))   # PHASE 22: raised cap from 9.0 to 9.5 for tail buffer room
         scene_durations.append(duration)
  
     total_duration = sum(scene_durations)
  
-    # Calculate fixed overhead from map stinger and outro
-    # Reserve 10s for overhead to guarantee <59s total
-    MAX_SCENE_TOTAL  = 49.0
-    MIN_SCENE_TOTAL  = 35.0   # reduced — enforce via scripting, not stretching
-
-    # PHASE 14: Moderate scaling — compress if too long, gently expand if too short.
-    # Max scale-up: 1.25× prevents more than ~1.3s dead air per scene.
-    # This is acceptable; the alternative (27s video) is not.
-    MAX_SCALE_UP   = 1.25   # never more than 25% longer than audio
-    MIN_SCENE_TOTAL = 38.0  # target at least 38s of content scenes
+    # PHASE 16: 85s ceiling prevents audio overlap.
+    # Previous 49s caused compression, so audio bled across scene boundaries.
+    # With 85s ceiling, a 9-scene x 5.75s video fits without compression.
+    MAX_SCENE_TOTAL  = 85.0   # raised from 49.0
+    MIN_SCENE_TOTAL  = 35.0
+    MAX_SCALE_UP     = 1.15   # gentle; primary fix is better scripting, not stretching
 
     if total_duration > MAX_SCENE_TOTAL:
         scale = MAX_SCENE_TOTAL / total_duration
+
+        # PHASE 20: If compression is > 5%, drop excess middle scenes
+        # rather than compressing all scenes and causing audio overlap.
+        # A 0.90x compression means every scene's audio bleeds 10% into the next.
+        MIN_SCALE = 0.95
+        if scale < MIN_SCALE:
+            # Drop scenes from the MIDDLE (preserve hook scene 0 and last scene)
+            _scenes_needed = int(MAX_SCENE_TOTAL / (total_duration / len(scenes)))
+            _scenes_needed = max(6, min(_scenes_needed, len(scenes) - 1))
+            print(f"[VIDEO] Compression would be {scale:.2f}x -- too aggressive. "
+                  f"Dropping {len(scenes) - _scenes_needed} middle scene(s) to avoid overlap.")
+            _hook  = scenes[0]
+            _close = scenes[-1]
+            _mid   = scenes[1:-1]
+            # Keep the shortest-audio middle scenes (less overflow risk)
+            _mid_sorted = sorted(_mid, key=lambda s: len(s.get("text","").split()))
+            _keep = _mid_sorted[:_scenes_needed - 2]
+            # Restore original order
+            _keep_ordered = sorted(_keep, key=lambda s: scenes.index(s))
+            scenes = [_hook] + _keep_ordered + [_close]
+            scene_durations = [scene_durations[scenes.index(s)] if s in scenes
+                               else 0 for s in scenes]
+            # Recompute durations from scratch for the trimmed scenes
+            scene_durations = []
+            for _s in scenes:
+                _ap = _s.get("audio_path")
+                if _ap and os.path.isfile(_ap):
+                    _ac = AudioFileClip(_ap)
+                    scene_durations.append(max(2.0, min(_ac.duration, 9.5)))
+                    _ac.close()
+                else:
+                    scene_durations.append(5.0)
+            total_duration = sum(scene_durations)
+            scale = min(MAX_SCENE_TOTAL / total_duration, 1.0)
+            print(f"[VIDEO] After scene drop: {len(scenes)} scenes, "
+                  f"new duration {total_duration:.1f}s, scale {scale:.2f}x")
+
         scene_durations = [d * scale for d in scene_durations]
-        print(f"[VIDEO] Compressed to fit: ×{scale:.2f}")
+        print(f"[VIDEO] Compressed to fit: x{scale:.2f}")
     elif total_duration < MIN_SCENE_TOTAL:
         scale = min(MIN_SCENE_TOTAL / total_duration, MAX_SCALE_UP)
         scene_durations = [d * scale for d in scene_durations]
-        print(f"[VIDEO] Expanded gently: ×{scale:.2f} (cap={MAX_SCALE_UP}×)")
+        print(f"[VIDEO] Expanded gently: x{scale:.2f} (cap={MAX_SCALE_UP}x)")
 
-    # Per-scene clamp: audio+buffer to 7.5s max, 2.0s min
-    scene_durations = [max(2.0, min(d, 7.5)) for d in scene_durations]
+
+    # PHASE 22: Per-scene clamp with raised cap + minimum 0.20s tail buffer applied to ALL scenes
+    scene_durations = [max(2.0, min(d, 9.5)) for d in scene_durations]
+    # Apply 0.20s tail buffer to every scene (not just the last one)
+    # This prevents audio overlap when scenes hit the 9.0s natural cap
+    scene_durations = [
+        min(d + 0.20, 9.5)
+        for d in scene_durations
+    ]
     print(f"[VIDEO] Scene total: {sum(scene_durations):.1f}s")
 
     # -- Final scene audio padding --------------------------------------
@@ -1527,10 +1686,29 @@ def build_video(scenes: list[dict], pipeline_meta: dict = None) -> str:
     # This does not affect the outro - the outro is appended separately.
     if scene_durations:
         scene_durations[-1] = min(
-            scene_durations[-1] + 0.30,   # 0.30s buffer (was 0.50)
-            7.5
+            scene_durations[-1] + 0.30,   # extra 0.30s on last scene (in addition to the 0.20s all-scene buffer)
+            9.5
         )
         print(f"[PADDING] Final scene extended to {scene_durations[-1]:.2f}s (+0.30s audio buffer)")
+
+    # PHASE 16: Per-scene overlap audit - warn if scene clip is shorter than audio
+    _overlap_detected = False
+    for _ai, (_scene, _dur) in enumerate(zip(scenes, scene_durations)):
+        _ap = _scene.get("audio_path")
+        if _ap and os.path.isfile(_ap):
+            _ac = AudioFileClip(_ap)
+            _raw = _ac.duration
+            _ac.close()
+            _tail = _dur - _raw
+            _flag = ""
+            if _tail < 0.15:
+                _flag = "  !! OVERLAP RISK !!"
+                _overlap_detected = True
+            elif _tail < 0.25:
+                _flag = "  (tight)"
+            print(f"[SCENE {_ai:02d}] audio={_raw:.2f}s | clip={_dur:.2f}s | tail={_tail:.2f}s{_flag}")
+    if _overlap_detected:
+        print("[VIDEO] !! Audio overlap risk detected - increase MAX_SCENE_TOTAL or shorten script !!")
 
     print(f"[PIPELINE] Total scenes planned: {len(scenes)}")
     print(f"[CONTEXT] Story type: {pipeline_meta.get('story_context', 'unknown') if pipeline_meta else 'unknown'}")
@@ -1549,7 +1727,8 @@ def build_video(scenes: list[dict], pipeline_meta: dict = None) -> str:
                     map_image_path=map_path,
                     location=location,
                     headline=headline,
-                    duration=2.5,
+                    hook_text=pipeline_meta.get("map_hook_text", ""),    # PHASE 22: pass hook text for captions
+                    duration=3.5,              # PHASE 21: raised from 2.5
                     audio_path=pipeline_meta.get("map_audio_path"),
                 )
                 clips.append(stinger)
@@ -1582,13 +1761,25 @@ def build_video(scenes: list[dict], pipeline_meta: dict = None) -> str:
         from script_generator import generate_dynamic_cta as _gen_cta
         _headline = (pipeline_meta.get("headline", "")
                      if pipeline_meta else "")
-        _context  = scenes[0].get("type", "neutral") if scenes else "neutral"
-        _cta      = _gen_cta(_headline, _context)
+        # PHASE 16: Use pipeline story context for CTA, not per-scene type
+        _cta_ctx = (
+            pipeline_meta.get("story_context", "neutral")
+            if pipeline_meta else "neutral"
+        )
+        _cta = _gen_cta(_headline, _cta_ctx)
+        print(f"[CTA] Generated for context='{_cta_ctx}'")
+        print(f"[CTA] main='{_cta.get('main_line', '')}'")
+        print(f"[CTA] sub='{_cta.get('sub_line', '')}'")
+        print(f"[CTA] engage='{_cta.get('engage_line', '')}'")
     except Exception as _exc:
         print(f"[CTA] Generation failed: {_exc} - using defaults")
         _cta = {}
 
-    outro_audio = _generate_outro_audio(cta=_cta)
+    _outro_ctx = (
+        pipeline_meta.get("story_context", "neutral")
+        if pipeline_meta else "neutral"
+    )
+    outro_audio = _generate_outro_audio(cta=_cta, story_context=_outro_ctx)
 
     # Pass scene 0 image path for the dynamic outro background
     _scene0_img = scenes[0].get("image_path") if scenes else None
@@ -1613,7 +1804,7 @@ def build_video(scenes: list[dict], pipeline_meta: dict = None) -> str:
   
     # -- Background music generation and mixing ----------------------------
     total_duration = final.duration
-    # PHASE 12: Music context selection — priority order:
+    # PHASE 12: Music context selection -- priority order:
     # 1. pipeline_meta["story_context"] IF it's a meaningful context (not neutral/general)
     # 2. Scene type voting (count which scene type appears most)
     # 3. "neutral" as last resort
@@ -1650,13 +1841,23 @@ def build_video(scenes: list[dict], pipeline_meta: dict = None) -> str:
         try:
             _music_audio = AudioFileClip(_music_file)
             # PHASE 13: Validate music actually has content
+            _min_music_dur = max(final.duration * 0.92, final.duration - 1.5)
             if _music_audio.duration < 5.0:
-                print(f"[MUSIC] ⚠️  Music file only {_music_audio.duration:.1f}s — "
-                      f"likely corrupted. Skipping music.")
+                print(f"[MUSIC] WARNING: Music only {_music_audio.duration:.1f}s - skipping")
                 _music_audio = None
-            elif _music_audio.duration < final.duration * 0.5:
-                print(f"[MUSIC] ⚠️  Music ({_music_audio.duration:.1f}s) much shorter "
-                      f"than video ({final.duration:.1f}s) — likely truncated.")
+            elif _music_audio.duration < _min_music_dur:
+                print(f"[MUSIC] WARNING: Music {_music_audio.duration:.1f}s < "
+                      f"required {_min_music_dur:.1f}s - regenerating")
+                _music_audio.close()
+                # Retry music generation with extended duration
+                _music_file2 = _generate_news_music(
+                    final.duration + 2.0, _context_for_music,
+                    _music_path.replace(".mp3", "_retry.mp3")
+                )
+                if _music_file2:
+                    _music_audio = AudioFileClip(_music_file2)
+                else:
+                    _music_audio = None
             
             if final.audio is not None and _music_audio is not None:
                 # PHASE 13: Mix at reduced volume to not overpower voice
@@ -1664,7 +1865,7 @@ def build_video(scenes: list[dict], pipeline_meta: dict = None) -> str:
                 _mixed = CompositeAudioClip([final.audio, _music_audio])
                 _mixed.duration = final.duration
                 final = final.with_audio(_mixed)
-                print(f"[MUSIC] ✓ Mixed into video — context='{_context_for_music}', "
+                print(f"[MUSIC] OK Mixed into video - context='{_context_for_music}', "
                       f"music_dur={_music_audio.duration:.1f}s, video_dur={final.duration:.1f}s")
             elif _music_audio is not None:
                 final = final.with_audio(_music_audio)
@@ -1686,22 +1887,45 @@ def build_video(scenes: list[dict], pipeline_meta: dict = None) -> str:
     print(f"[VIDEO] Output path: {OUTPUT_VIDEO}")
     print(f"[VideoBuilder] Rendering -> {OUTPUT_VIDEO}")
  
-    final.write_videofile(
-        OUTPUT_VIDEO,
-        fps=VIDEO_FPS,
-        codec="libx264",
-        audio_codec="aac",
-        audio_fps=44100,
-        threads=4,
-        preset="veryfast",
-        ffmpeg_params=["-crf", "23", "-movflags", "+faststart"],
-        temp_audiofile=OUTPUT_VIDEO.replace(".mp4", "_tmp_audio.m4a"),
-        remove_temp=True,
-        logger="bar",
-    )
-  
-    print(f"[VIDEO] Rendering completed")
-    print(f"[VideoBuilder] [DONE] -> {OUTPUT_VIDEO}")
+    try:
+        final.write_videofile(
+            OUTPUT_VIDEO,
+            fps=VIDEO_FPS,
+            codec="libx264",
+            audio_codec="aac",
+            audio_fps=44100,
+            threads=4,
+            preset="veryfast",
+            ffmpeg_params=[
+                "-crf", "23",
+                "-movflags", "+faststart",
+                "-force_key_frames", "0",      # PHASE 22: force keyframe at t=0 â€” eliminates black first frames
+                "-g", "48",                    # PHASE 22: keyframe every 2 seconds at 24fps
+                "-keyint_min", "24",           # PHASE 22: minimum keyframe interval
+            ],
+            temp_audiofile=OUTPUT_VIDEO.replace(".mp4", "_tmp_audio.m4a"),
+            remove_temp=True,
+            logger="bar" if sys.stdout.isatty() else None,
+        )
+        print(f"[VIDEO] Rendering completed")
+        print(f"[VideoBuilder] [DONE] -> {OUTPUT_VIDEO}")
+    finally:
+        print("[VideoBuilder] Cleaning up video/audio assets and closing clips...")
+        try:
+            final.close()
+        except Exception as exc:
+            print(f"[VideoBuilder] Error closing final clip: {exc}")
+        if '_music_audio' in locals() and _music_audio:
+            try:
+                _music_audio.close()
+            except Exception as exc:
+                print(f"[VideoBuilder] Error closing music clip: {exc}")
+        for c in clips:
+            try:
+                c.close()
+            except Exception as exc:
+                pass
+
     return OUTPUT_VIDEO
  
  
@@ -1714,3 +1938,5 @@ if __name__ == "__main__":
          "keyword": "science", "image_path": None, "audio_path": None},
     ]
     build_video(test_scenes)
+
+

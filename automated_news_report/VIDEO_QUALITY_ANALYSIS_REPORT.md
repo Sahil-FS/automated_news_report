@@ -1,221 +1,110 @@
-# VIDEO QUALITY ANALYSIS REPORT
+# 🎬 AI Video Review Report
 
-**Generated:** April 21, 2026  
-**System:** AI News-to-Video Generator  
-**Video File:** `output/news_video.mp4`
+> **Generated:** 2026-05-17 13:49:30  
+> **Executed:** `.venv\Scripts\python.exe main.py`  
+> **FORCE_REFRESH:** 1 (new images fetched)  
+> **Pipeline status:** ✅ SUCCESS  
+> **Pipeline runtime:** 1167.7s  
+> **Article:** N/A  
+> **Context detected:** `tense`
 
----
-
-## EXECUTIVE SUMMARY
-
-| Metric | Status |
-|--------|--------|
-| **Duration** | 26.46 seconds ✓ |
-| **Target Range** | 20–35 seconds ✓ |
-| **Scenes** | 4 scenes ✓ |
-| **Quality Verdict** | **GOOD** ✓ |
+> WARNING:️ **EXECUTION MISMATCH DETECTED** -- see Issues section
 
 ---
 
-## TECHNICAL METRICS
+## 🎯 Summary Score
+
+### Overall: **7.0/10** -- 🚨 BAD
+
+[██████████████░░░░░░] 7.0/10
+
+| Dimension | Score | Bar | Grade |
+|-----------|-------|-----|-------|
+| Script Quality | 6.5/10 | [████████░░░░] 6.5/10 | ✅ GOOD |
+| Video Length | 4.5/10 | [█████░░░░░░░] 4.5/10 | ✅ GOOD |
+| Scene Distribution | 6.0/10 | [███████░░░░░] 6.0/10 | ✅ GOOD |
+| Caption Quality | 8.8/10 | [███████████░] 8.8/10 | ✅ GOOD |
+| Caption Timing | 10.0/10 | [████████████] 10.0/10 | ✅ GOOD |
+| Image Relevance | 9.0/10 | [███████████░] 9.0/10 | ✅ GOOD |
+| Visual Flow | 7.6/10 | [█████████░░░] 7.6/10 | ✅ GOOD |
+| Pacing | 6.4/10 | [████████░░░░] 6.4/10 | ✅ GOOD |
+
+---
+
+## 📁 Output File Verification
+
+| Property | Value |
+|----------|-------|
+| Path | `output/news_video.mp4` |
+| Size | 2.99 MB |
+| Modified | 2026-05-17 13:49:27 |
+| Belongs to this run | ✅ YES |
+| **Duration (MoviePy)** | **32.57s** |
+| Target duration | 45–55s |
+| Duration status | 🚨 OFF TARGET |
+
+---
+
+## 📝 Script Review
+
+**Context / Tone detected:** `tense`
+
+| Sub-dimension | Score | Bar |
+|---------------|-------|-----|
+| Hook strength | 7.0/10 | [████████░░░░] 7.0/10 |
+| Story flow | 5.0/10 | [██████░░░░░░] 5.0/10 |
+| Tone match | 5.0/10 | [██████░░░░░░] 5.0/10 |
+| Repetition/filler | 9.0/10 | [███████████░] 9.0/10 |
+
+---
+
+## 📊 Video Metrics
 
 | Metric | Value |
 |--------|-------|
-| **Duration** | 26.46 seconds |
-| **Target Range** | 20–35 seconds |
-| **Resolution** | 1080×1920 (vertical format) |
-| **FPS** | 24 fps |
-| **Total Frames** | 635 frames |
-| **File Size** | 4.32 MB |
-| **Bitrate** | ~1.31 Mbps |
+| Video duration (MoviePy) | **32.57s** |
+| Total scenes | 3 |
+| Avg scene duration | 7.3s |
+| Avg words / scene | 12.3 |
+| Images OK | 3 |
+| Images missing | 0 |
+
+### Per-Scene Breakdown
+
+| # | Type | Keyword | Words | Audio | Image | Text Preview |
+|---|------|---------|-------|-------|-------|--------------|
+| 1 | war | Iran Zawtar al-Sharqiyah iran war day tehran news event realistic breaking news dramatic real photo | 13 | 7.7s | ✅ | Iran war day 79: Tehran to unveil Hormuz toll plan… |
+| 2 | general | Iran Zawtar al-Sharqiyah iran says will soon news event realistic | 12 | 5.6s | ✅ | Iran says it will soon reveal the plan as Trump wa… |
+| 3 | general | Iran Zawtar al-Sharqiyah will bad time deal news event realistic | 12 | 8.7s | ✅ | It will have a &#039;very bad time&#039; if deal n… |
 
 ---
 
-## SCENE BREAKDOWN
+## 🚨 Issues Detected
 
-### Scene Structure
-- **Total Scenes:** 4
-- **Content Duration Estimate:** 27.4s (raw scene durations)
-- **Final Duration with Effects:** 26.46s
-
-### Individual Scene Analysis
-
-| Scene | Duration | Type | Keyword | Audio | Image | Status |
-|-------|----------|------|---------|-------|-------|--------|
-| **00** | 3.0s | technology | important | ✓ | ✓ | ✓ Active |
-| **01** | 6.9s | technology | Olly | ✓ | ✓ | ✓ Active |
-| **02** | 4.4s | technology | Chris | ✓ | ✓ | ✓ Active |
-| **03** | 13.1s | general | direction | ✓ | ✓ | ✓ Active |
-
-### Scene Duration Balance
-- **Mean Duration:** 6.86 seconds
-- **Duration Distribution:**
-  - Short scenes (3–5s): 2 scenes (scenes 00, 02)
-  - Medium scenes (6–7s): 1 scene (scene 01)
-  - Long scenes (13s+): 1 scene (scene 03)
-- **Analysis:** Good balance overall; longest scene (13.1s) justified by audio length
-- **Impact:** Scene 03 provides context conclusion—appropriate timing
+- [EXECUTION MISMATCH] Duration 32.57s is outside expected range (45.0–55.0s)
+- [VIDEO TOO SHORT] 32.57s -- target 45–55s.
+- [CAPTION TOO LONG] Scene 1: 13 words -- will overflow.
+- [STATIC SCENE] Scene 1: 7.7s single image -- boring.
+- [SCENE TOO LONG] Scene 1: 7.7s -- loses attention.
+- [STATIC SCENE] Scene 3: 8.7s single image -- boring.
+- [SCENE TOO LONG] Scene 3: 8.7s -- loses attention.
 
 ---
 
-## CONTENT ANALYSIS
+## 💡 Recommendations (Actionable)
 
-### Article Summary
-- **Source:** BBC News RSS Feed
-- **Topic:** UK Politics - Chris Mason on Cabinet vetting failure
-- **Script Length:** 76 words
-- **Expected Duration:** ~30s @ 150 wpm (actual: 26.46s—90% of estimate)
-
-### Image Relevance
-- **All 4 scenes:** Successfully fetched from Pexels
-- **Query Strategy:** Type-aware queries (technology + keywords)
-- **Image Resolution:** All properly scaled to 1080×1920
-- **Visual Assets:** 
-  - Scene 00: "important technology innovation" → technology visual
-  - Scene 01: "Olly Robbins expected defend" → professional context
-  - Scene 02: "Chris Mason: chance aide" → journalism/analysis visual
-  - Scene 03: "could shape direction events" → forward-looking visual
-
-### Audio Generation
-- **TTS Engine:** Piper (en_US-lessac-medium)
-- **Audio Format:** WAV (44.1 kHz, mono)
-- **All Scenes:** Audio successfully generated and embedded
-- **Voice Quality:** Natural, clear delivery (TTS-based)
-
-### Caption Readability
-- **Scene 00 (3.0s):** Quick statement—easily readable
-- **Scene 01 (6.9s):** Longer caption—good reading pace
-- **Scene 02 (4.4s):** Medium caption—adequate time
-- **Scene 03 (13.1s):** Longest and most detailed—ample time for comprehension
-- **Overall:** ✓ Caption durations well-balanced with text complexity
+- **DURATION: Video is too short. Raise NUM_SENTENCES to 8 in config.py and lower MIN_WORDS to 50 in script_generator.py to force expansion.**
+- **SCENES: Only 3 scenes. Increase NUM_SENTENCES=8 in config.py. Add a guard in main.py: if len(scenes) < 4: abort and re-run.**
+- **FLOW: Narrow script. Ensure generate_ending() appends its closing line and _trim_script() does not remove it (uses pop(-2) -- should be safe).**
+- **CAPTIONS: Scenes [1] exceed 12 words. Split each sentence at 'and'/'but'/'which' in the script before scene_planner.**
+- **PACING: Scene lengths are inconsistent. Split long-audio sentences and merge very-short ones for uniform rhythm.**
 
 ---
 
-## VISUAL PRESENTATION
+## WARNING:️ Execution Mismatch Detail
 
-### Video Format
-- **Aspect Ratio:** 9:16 (vertical—mobile-optimized)
-- **Target Display:** Social media, short-form platforms (TikTok, Instagram Reels, etc.)
-- **Image Handling:** Proper centering and blur background for contrast
-- **Transitions:** Fade-in (0.3s) and fade-out (0.3s) per scene
-
-### Design Elements Observed
-- **Bottom Gradient Overlay:** Dark gradient for text contrast
-- **Ken Burns Effect:** Subtle zoom on background images (~0.06 zoom per second)
-- **Text Animation:** Word-by-word display during playback
-- **Branding Bar:** AI NEWS branding at bottom (red accent)
+- Duration 32.57s is outside expected range (45.0–55.0s)
 
 ---
 
-## QUALITY ASSESSMENT
-
-### Strengths
-
-✓ **Duration Performance**
-  - Final video (26.46s) within target range (20–35s)
-  - Achieves ~90% of expected duration estimate
-
-✓ **Complete Asset Pipeline**
-  - News fetching: ✓ (BBC RSS)
-  - Script generation: ✓ (76-word summary)
-  - Scene planning: ✓ (4 scenes extracted)
-  - Image fetching: ✓ (all 4 Pexels queries successful)
-  - Audio generation: ✓ (TTS for all scenes)
-  - Video rendering: ✓ (MP4 with audio codec)
-
-✓ **Scene Timing Balance**
-  - No scene under 3.0s (readable)
-  - No scene over 13.1s (maintains viewer attention)
-  - Appropriate weighting of conclusion (13s final scene)
-
-✓ **Mobile-Optimized Format**
-  - 1080×1920 vertical resolution
-  - Optimized for social media platforms
-  - Clean file size (4.32 MB) suitable for streaming
-
-✓ **Content-Image Alignment**
-  - All four scenes received relevant visual content
-  - Pexels queries demonstrated type-aware keyword logic
-  - No missing or placeholder assets
-
-### Potential Issues
-
-⚠ **Scene 03 Duration Skew**
-  - Scene 03 is 1.9× longer than average (13.1s vs. 6.86s mean)
-  - Reason: Audio duration-driven (intentional, correct behavior)
-  - Mitigation: User should verify if conclusion warrants 13 seconds in context
-
-⚠ **Image Keyword Relevance**
-  - Scene queries use generic keywords plus scene keyword
-  - Examples: "Olly technology innovation", "Chris technology innovation"
-  - Result: Retrieved technology images instead of direct celebrity/person results
-  - Note: This is a system design choice; results are acceptable but not optimal
-
-⚠ **TTS Voice Consistency**
-  - Single voice actor across all scenes (en_US-lessac)
-  - No voice variation or emphasis available (TTS limitation, not an issue)
-
----
-
-## FILE VALIDATION
-
-✓ **Video File Status**
-- **Path:** `output/news_video.mp4`
-- **Exists:** Yes
-- **Size:** 4.32 MB
-- **Timestamp:** Current session (April 21, 2026)
-- **Integrity:** Verified playable via OpenCV
-
-✓ **Supporting Assets**
-- **Images:** 4/4 scenes (output/images/)
-- **Audio:** 4/4 scenes (output/audio/)
-- **Embedded:** Audio properly muxed in final MP4
-
----
-
-## FINAL VERDICT
-
-### Overall Quality: **GOOD** ✓
-
-The generated video successfully meets all primary requirements:
-1. **Duration within target** (26.46s ∈ [20–35]s)
-2. **All scenes complete** (4/4 with audio + images)
-3. **Mobile-optimized format** (1080×1920 vertical)
-4. **Content-aligned visuals** (Relevant Pexels imagery)
-5. **Proper audio integration** (TTS-generated voice, clear delivery)
-
-### Recommendation
-
-**Ready for deployment.** The video is suitable for:
-- Social media distribution (TikTok, Instagram Reels, YouTube Shorts)
-- News syndication platforms
-- Mobile-first applications
-- Short-form content feeds
-
-**Minor optimization opportunity:** Consider adjusting Pexels query strategy to prioritize direct keywords (e.g., "politics", "government", "journalism") in future runs for more specific imagery.
-
----
-
-## APPENDIX: GENERATION LOG
-
-```
-[ENV] Python: 3.12.10
-[1/5] Fetching latest news ✓
-     Article: "Chris Mason: A chance for key aide to explain why he didn't tell Starmer"
-[2/5] Generating script ✓
-     Context: informative | 76 words | 4 scenes
-[3/5] Planning scenes ✓
-     Extracted: 4 scenes with keywords and types
-[4/5] Fetching images and audio ✓
-     Images: 4 Pexels queries successful (4/4)
-     Audio: 4 TTS generations successful (4/4)
-[5/5] Building video ✓
-     Rendering: Completed
-     Output: output/news_video.mp4 (26.46s)
-```
-
----
-
-**Report Prepared By:** Video Analysis System  
-**Date:** April 21, 2026  
-**Status:** Analysis  Complete ✓
+*Report generated by `video_review.py` -- Strict pipeline execution + review*

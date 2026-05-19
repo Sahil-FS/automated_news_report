@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """
-video_review.py — Strict AI Video Review System
+video_review.py -- Strict AI Video Review System
 ================================================
 
 PRIMARY RULE:
-  Executes `.venv\\Scripts\\python.exe main.py` as a subprocess — exactly
+  Executes `.venv\\Scripts\\python.exe main.py` as a subprocess -- exactly
   matching terminal behaviour.  Reviews ONLY the video produced by that run.
 
 Rules enforced:
-  • Uses .venv Python exclusively — no system Python
-  • Runs main.py directly — no module imports, no partial pipeline
-  • FORCE_REFRESH=1 is injected into the subprocess environment
-  • Duration is read from the output file via MoviePy
-  • Execution-mismatch is detected and reported
-  • No extra files created; only news_video.mp4 is the review target
+  * Uses .venv Python exclusively -- no system Python
+  * Runs main.py directly -- no module imports, no partial pipeline
+  * FORCE_REFRESH=1 is injected into the subprocess environment
+  * Duration is read from the output file via MoviePy
+  * Execution-mismatch is detected and reported
+  * No extra files created; only news_video.mp4 is the review target
 
 Usage:
     .venv\\Scripts\\python.exe video_review.py
@@ -41,15 +41,19 @@ from pathlib import Path
 # PATHS
 # ─────────────────────────────────────────────────────────────────────────────
 ROOT         = os.path.dirname(os.path.abspath(__file__))
-VENV_PYTHON  = os.path.join(ROOT, ".venv", "Scripts", "python.exe")
+import sys
+if sys.platform == "win32":
+    VENV_PYTHON = os.path.join(ROOT, ".venv", "Scripts", "python.exe")
+else:
+    VENV_PYTHON = os.path.join(ROOT, ".venv", "bin", "python")
 MAIN_SCRIPT  = os.path.join(ROOT, "main.py")
 OUTPUT_VIDEO = os.path.join(ROOT, "output", "news_video.mp4")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CONSTANTS
 # ─────────────────────────────────────────────────────────────────────────────
-TARGET_DUR_LOW  = 45.0   # seconds — minimum acceptable
-TARGET_DUR_HIGH = 55.0   # seconds — maximum acceptable (expanded range)
+TARGET_DUR_LOW  = 45.0   # seconds -- minimum acceptable
+TARGET_DUR_HIGH = 55.0   # seconds -- maximum acceptable (expanded range)
 MIN_SCENES      = 3
 REPORT_PATH     = os.path.join(ROOT, "VIDEO_QUALITY_ANALYSIS_REPORT.md")
 
@@ -57,7 +61,7 @@ MAX_CAPTION_WORDS = 12   # words per scene before overflow risk
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# STEP 1 —  Pre-flight checks
+# STEP 1 --  Pre-flight checks
 # ═════════════════════════════════════════════════════════════════════════════
 
 def preflight():
@@ -75,7 +79,7 @@ def preflight():
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# STEP 2 — Run main.py via subprocess (terminal-identical execution)
+# STEP 2 -- Run main.py via subprocess (terminal-identical execution)
 # ═════════════════════════════════════════════════════════════════════════════
 
 def run_main_pipeline():
@@ -102,7 +106,7 @@ def run_main_pipeline():
         cwd=ROOT,
         env=env,
         stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,       # merge stderr → stdout
+        stderr=subprocess.STDOUT,       # merge stderr -> stdout
         text=True,
         encoding="utf-8",
         errors="replace",
@@ -117,12 +121,12 @@ def run_main_pipeline():
     proc.wait()
     elapsed = time.time() - t_start
 
-    print(f"\n[REVIEW] Pipeline finished in {elapsed:.1f}s — exit code: {proc.returncode}")
+    print(f"\n[REVIEW] Pipeline finished in {elapsed:.1f}s -- exit code: {proc.returncode}")
     return captured_lines, proc.returncode, elapsed
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# STEP 3 — Verify output file belongs to THIS run
+# STEP 3 -- Verify output file belongs to THIS run
 # ═════════════════════════════════════════════════════════════════════════════
 
 def verify_output(run_started_at: float) -> dict:
@@ -153,7 +157,7 @@ def verify_output(run_started_at: float) -> dict:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# STEP 4 — Read video duration via MoviePy (source of truth)
+# STEP 4 -- Read video duration via MoviePy (source of truth)
 # ═════════════════════════════════════════════════════════════════════════════
 
 def get_video_duration() -> float:
@@ -178,7 +182,7 @@ def get_video_duration() -> float:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# STEP 5 — Parse pipeline stdout for review data
+# STEP 5 -- Parse pipeline stdout for review data
 # ═════════════════════════════════════════════════════════════════════════════
 
 class ParsedRun:
@@ -222,9 +226,9 @@ def parse_stdout(lines: list, exit_code: int) -> ParsedRun:
             run.script = m.group(1).strip()
             break
 
-    # Full script from ScriptGen final log: "[ScriptGen] Final → N words ≈ Xs | M scenes | context='...'"
+    # Full script from ScriptGen final log: "[ScriptGen] Final -> N words ≈ Xs | M scenes | context='...'"
     for line in lines:
-        m = re.search(r"\[ScriptGen\] Final → (\d+) words.*?(\d+) scenes.*?context='([^']+)'", line)
+        m = re.search(r"\[ScriptGen\] Final -> (\d+) words.*?(\d+) scenes.*?context='([^']+)'", line)
         if m:
             run.context = m.group(3).strip()
             break
@@ -248,7 +252,7 @@ def parse_stdout(lines: list, exit_code: int) -> ParsedRun:
         except Exception as _je:
             print(f"[REVIEW] scenes.json load failed: {_je}")
     else:
-        print("[REVIEW] scenes.json not found — scene metrics will be limited")
+        print("[REVIEW] scenes.json not found -- scene metrics will be limited")
 
     # Audio: "[VoiceGen] Audio saved -> .../scene_XX_HASH.wav" or Cache hit
     audio_saved = {}
@@ -257,9 +261,9 @@ def parse_stdout(lines: list, exit_code: int) -> ParsedRun:
         if m:
             audio_saved[int(m.group(1))] = True
 
-    # Video scenes: "[VideoBuilder] Scene XX — Y.Zs | audio=Y | image=Y"
+    # Video scenes: "[VideoBuilder] Scene XX -- Y.Zs | audio=Y | image=Y"
     video_scene_re = re.compile(
-        r"\[VideoBuilder\] Scene (\d+) — ([\d.]+)s \| audio=([YN]) \| image=([YN])"
+        r"\[VideoBuilder\] Scene (\d+)\s*(?:--|-)\s*([\d.]+)s\s*\|\s*audio=([YN])\s*\|\s*image=([YN])"
     )
     scene_durations = {}
     image_flags = {}
@@ -308,7 +312,7 @@ def parse_stdout(lines: list, exit_code: int) -> ParsedRun:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# STEP 6 — Mismatch detection
+# STEP 6 -- Mismatch detection
 # ═════════════════════════════════════════════════════════════════════════════
 
 def check_mismatch(duration: float, run: ParsedRun) -> list:
@@ -326,7 +330,7 @@ def check_mismatch(duration: float, run: ParsedRun) -> list:
 
     if len(run.scenes) < MIN_SCENES:
         mismatches.append(
-            f"Only {len(run.scenes)} scene(s) detected — minimum is {MIN_SCENES}"
+            f"Only {len(run.scenes)} scene(s) detected -- minimum is {MIN_SCENES}"
         )
 
     if not run.pipeline_ok:
@@ -336,14 +340,14 @@ def check_mismatch(duration: float, run: ParsedRun) -> list:
         print("\n" + "!" * 60)
         print("  Execution mismatch detected")
         for m in mismatches:
-            print(f"    • {m}")
+            print(f"    * {m}")
         print("!" * 60 + "\n")
 
     return mismatches
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# STEP 7 — Scoring engine (strict, 0–10)
+# STEP 7 -- Scoring engine (strict, 0–10)
 # ═════════════════════════════════════════════════════════════════════════════
 
 def _clamp(v, lo=0.0, hi=10.0):
@@ -372,7 +376,7 @@ def check_caption_sync(run: ParsedRun) -> tuple:
         if actual_words > 0 and abs(actual_words - expected_words) > expected_words * 0.2:
             issues.append(
                 f"Scene {i}: {actual_words} words vs {expected_words} expected "
-                f"(audio {audio_dur:.1f}s) — possible timing mismatch"
+                f"(audio {audio_dur:.1f}s) -- possible timing mismatch"
             )
     
     is_ok = len(issues) == 0
@@ -390,11 +394,11 @@ def check_scene_duration(run: ParsedRun) -> tuple:
         audio_dur = scene.get("audio_dur", 0.0)
         if audio_dur > max_acceptable:
             issues.append(
-                f"Scene {i}: {audio_dur:.1f}s exceeds {max_acceptable}s — "
+                f"Scene {i}: {audio_dur:.1f}s exceeds {max_acceptable}s -- "
                 f"viewer fatigue risk"
             )
         if audio_dur > 10:
-            issues.append(f"Scene {i}: too long (>10s) — possible freeze")
+            issues.append(f"Scene {i}: too long (>10s) -- possible freeze")
     
     is_ok = len(issues) == 0
     return is_ok, issues
@@ -411,7 +415,7 @@ def check_caption_size(run: ParsedRun) -> tuple:
         word_count = _wc(text)
         if word_count > MAX_CAPTION_WORDS:
             issues.append(
-                f"Scene {i}: {word_count} words exceeds {MAX_CAPTION_WORDS} — "
+                f"Scene {i}: {word_count} words exceeds {MAX_CAPTION_WORDS} -- "
                 f"readability overflow risk"
             )
     
@@ -444,10 +448,10 @@ def score_hook(text: str) -> tuple:
     score += min(len(strong), 3) * 0.5
     if _wc(text) < 8:
         score -= 1.5
-        issues.append("Hook < 8 words — low engagement.")
+        issues.append("Hook < 8 words -- low engagement.")
     if _wc(text) > 30:
         score -= 1.0
-        issues.append("Hook > 30 words — too long.")
+        issues.append("Hook > 30 words -- too long.")
     return _clamp(score), issues
 
 TONE_MAP = {
@@ -499,9 +503,9 @@ def score_repetition(script: str) -> tuple:
 def score_flow(scene_count: int, script: str) -> tuple:
     score, issues = 8.0, []
     if scene_count < 3:
-        score -= 4.0; issues.append(f"Only {scene_count} scenes — no narrative arc.")
+        score -= 4.0; issues.append(f"Only {scene_count} scenes -- no narrative arc.")
     elif scene_count < 5:
-        score -= 1.5; issues.append(f"Only {scene_count} scenes — thin structure.")
+        score -= 1.5; issues.append(f"Only {scene_count} scenes -- thin structure.")
     sents = re.split(r"(?<=[.!?])\s+", script.strip())
     if sents and not sents[-1].endswith((".", "!", "?")):
         score -= 1.5; issues.append("Ending sentence missing terminal punctuation.")
@@ -526,7 +530,7 @@ def score_length(dur: float) -> tuple:
     if dur <= 0:
         return 0.0, ["Cannot determine video duration."]
     if dur < 20:
-        score = 1.0; issues.append(f"Video critically short ({dur:.1f}s) — target 45–55s.")
+        score = 1.0; issues.append(f"Video critically short ({dur:.1f}s) -- target 45–55s.")
     elif dur < 40:
         score = 4.5; issues.append(f"Video too short ({dur:.1f}s < 40s).")
     elif dur <= 55:
@@ -542,13 +546,13 @@ def score_length(dur: float) -> tuple:
 def score_scenes(run: ParsedRun) -> tuple:
     n, issues = len(run.scenes), []
     if n < 3:    base = 2.0;  issues.append(f"Critically few scenes ({n}).")
-    elif n < 6:  base = 6.0;  issues.append(f"Low scene count ({n}) — consider splitting sentences.")
+    elif n < 6:  base = 6.0;  issues.append(f"Low scene count ({n}) -- consider splitting sentences.")
     elif n <= 10: base = 10.0
-    elif n <= 14: base = 8.0;  issues.append(f"Many scenes ({n}) — pacing may feel rushed.")
+    elif n <= 14: base = 8.0;  issues.append(f"Many scenes ({n}) -- pacing may feel rushed.")
     else:         base = 5.0;  issues.append(f"Too many scenes ({n}).")
     long_s = [(i, _wc(s["text"])) for i, s in enumerate(run.scenes) if _wc(s["text"]) > 20]
     for i, w in long_s:
-        issues.append(f"Scene {i+1}: {w} words — very long; split recommended.")
+        issues.append(f"Scene {i+1}: {w} words -- very long; split recommended.")
     return _clamp(base - len(long_s) * 1.5), issues
 
 # ── Captions ──────────────────────────────────────────────────────────────────
@@ -559,11 +563,11 @@ def score_captions(run: ParsedRun) -> tuple:
         w = _wc(s["text"])
         if w > MAX_CAPTION_WORDS:
             score -= 1.2
-            issues.append(f"Scene {i+1}: {w} words — caption overflow risk.")
+            issues.append(f"Scene {i+1}: {w} words -- caption overflow risk.")
         lines = textwrap.wrap(s["text"], width=28)
         if len(lines) > 3:
             score -= 1.5
-            issues.append(f"Scene {i+1}: wraps to {len(lines)} lines — card overflow.")
+            issues.append(f"Scene {i+1}: wraps to {len(lines)} lines -- card overflow.")
     return _clamp(score), issues
 
 # ── Timing ────────────────────────────────────────────────────────────────────
@@ -576,9 +580,9 @@ def score_timing(run: ParsedRun) -> tuple:
             score -= 1.0; issues.append(f"Scene {i+1}: no audio timing data."); continue
         wps = _wc(s["text"]) / dur
         if wps > 3.5:
-            score -= 1.2; issues.append(f"Scene {i+1}: {wps:.1f} words/sec — too fast.")
+            score -= 1.2; issues.append(f"Scene {i+1}: {wps:.1f} words/sec -- too fast.")
         elif wps < 0.8:
-            score -= 0.5; issues.append(f"Scene {i+1}: {wps:.1f} words/sec — too slow.")
+            score -= 0.5; issues.append(f"Scene {i+1}: {wps:.1f} words/sec -- too slow.")
     return _clamp(score), issues
 
 # ── Image relevance ───────────────────────────────────────────────────────────
@@ -588,12 +592,12 @@ def score_images(run: ParsedRun) -> tuple:
     fail = run.images_fail
     if fail > 0:
         score -= fail * 1.5
-        issues.append(f"{fail} scene(s) missing images — fallback background used.")
+        issues.append(f"{fail} scene(s) missing images -- fallback background used.")
     # Check for very long single-image scenes
     for i, s in enumerate(run.scenes):
         if s["audio_dur"] > 6.0 and s.get("has_image"):
             score -= 0.5
-            issues.append(f"Scene {i+1}: {s['audio_dur']:.1f}s on single image — static.")
+            issues.append(f"Scene {i+1}: {s['audio_dur']:.1f}s on single image -- static.")
     return _clamp(score), issues
 
 # ── Visual flow ───────────────────────────────────────────────────────────────
@@ -602,9 +606,9 @@ def score_flow_visual(run: ParsedRun, duration: float) -> tuple:
     score, issues = 10.0, []
     for i, s in enumerate(run.scenes):
         if s["audio_dur"] > 7.0:
-            score -= 1.2; issues.append(f"Scene {i+1}: {s['audio_dur']:.1f}s — may bore viewers.")
+            score -= 1.2; issues.append(f"Scene {i+1}: {s['audio_dur']:.1f}s -- may bore viewers.")
     if not any(s.get("has_image") for s in run.scenes):
-        score -= 4.0; issues.append("No scenes have images — entirely dark fallback.")
+        score -= 4.0; issues.append("No scenes have images -- entirely dark fallback.")
     return _clamp(score), issues
 
 # ── Pacing ────────────────────────────────────────────────────────────────────
@@ -613,7 +617,7 @@ def score_pacing(run: ParsedRun) -> tuple:
     durations = [s["audio_dur"] for s in run.scenes if s["audio_dur"] > 0]
     score, issues = 10.0, []
     if not durations:
-        return 5.0, ["No audio data — pacing cannot be evaluated."]
+        return 5.0, ["No audio data -- pacing cannot be evaluated."]
     avg = sum(durations) / len(durations)
     
     if 4.0 <= avg <= 6.0:
@@ -627,14 +631,14 @@ def score_pacing(run: ParsedRun) -> tuple:
         score -= 2.0; issues.append(f"Uneven pacing (σ={std:.1f}s).")
     for i, s in enumerate(run.scenes):
         if s["audio_dur"] > 7.0:
-            score -= 0.8; issues.append(f"Scene {i+1}: {s['audio_dur']:.1f}s audio — too slow.")
+            score -= 0.8; issues.append(f"Scene {i+1}: {s['audio_dur']:.1f}s audio -- too slow.")
         elif 0 < s["audio_dur"] < 1.0:
-            score -= 0.5; issues.append(f"Scene {i+1}: {s['audio_dur']:.1f}s — too brief.")
+            score -= 0.5; issues.append(f"Scene {i+1}: {s['audio_dur']:.1f}s -- too brief.")
     return _clamp(score), issues
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# STEP 8 — Issue collector
+# STEP 8 -- Issue collector
 # ═════════════════════════════════════════════════════════════════════════════
 
 def collect_issues(run: ParsedRun, dur: float, scores: dict, mismatches: list) -> list:
@@ -646,28 +650,28 @@ def collect_issues(run: ParsedRun, dur: float, scores: dict, mismatches: list) -
 
     # Duration
     if dur > 0 and dur < 40:
-        out.append(f"[VIDEO TOO SHORT] {dur:.2f}s — target 45–55s.")
+        out.append(f"[VIDEO TOO SHORT] {dur:.2f}s -- target 45–55s.")
     if dur > 65:
-        out.append(f"[VIDEO TOO LONG] {dur:.2f}s — aim for under 60s.")
+        out.append(f"[VIDEO TOO LONG] {dur:.2f}s -- aim for under 60s.")
 
     # Scenes
     if len(run.scenes) < MIN_SCENES:
-        out.append(f"[TOO FEW SCENES] {len(run.scenes)} scene(s) — minimum {MIN_SCENES}.")
+        out.append(f"[TOO FEW SCENES] {len(run.scenes)} scene(s) -- minimum {MIN_SCENES}.")
 
     # Per scene
     for i, s in enumerate(run.scenes):
         if _wc(s["text"]) > MAX_CAPTION_WORDS:
-            out.append(f"[CAPTION TOO LONG] Scene {i+1}: {_wc(s['text'])} words — will overflow.")
+            out.append(f"[CAPTION TOO LONG] Scene {i+1}: {_wc(s['text'])} words -- will overflow.")
         if s["audio_dur"] > 6.0 and s.get("has_image"):
-            out.append(f"[STATIC SCENE] Scene {i+1}: {s['audio_dur']:.1f}s single image — boring.")
+            out.append(f"[STATIC SCENE] Scene {i+1}: {s['audio_dur']:.1f}s single image -- boring.")
         if s["audio_dur"] > 7.0:
-            out.append(f"[SCENE TOO LONG] Scene {i+1}: {s['audio_dur']:.1f}s — loses attention.")
+            out.append(f"[SCENE TOO LONG] Scene {i+1}: {s['audio_dur']:.1f}s -- loses attention.")
         if not s.get("has_image"):
-            out.append(f"[IMAGE MISSING] Scene {i+1}: no image — dark fallback used.")
+            out.append(f"[IMAGE MISSING] Scene {i+1}: no image -- dark fallback used.")
 
     # Script
     if scores["script"]["hook"] < 5.0:
-        out.append(f"[WEAK HOOK] Hook score {scores['script']['hook']}/10 — needs stronger opener.")
+        out.append(f"[WEAK HOOK] Hook score {scores['script']['hook']}/10 -- needs stronger opener.")
 
     # Dedup
     seen, deduped = set(), []
@@ -679,7 +683,7 @@ def collect_issues(run: ParsedRun, dur: float, scores: dict, mismatches: list) -
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# STEP 9 — Recommendations
+# STEP 9 -- Recommendations
 # ═════════════════════════════════════════════════════════════════════════════
 
 def recommendations(run: ParsedRun, dur: float, scores: dict) -> list:
@@ -708,7 +712,7 @@ def recommendations(run: ParsedRun, dur: float, scores: dict) -> list:
     if scores["script"]["flow"] < 7:
         recs.append(
             "FLOW: Narrow script. Ensure generate_ending() appends its closing line "
-            "and _trim_script() does not remove it (uses pop(-2) — should be safe)."
+            "and _trim_script() does not remove it (uses pop(-2) -- should be safe)."
         )
 
     long_scenes = [i+1 for i, s in enumerate(run.scenes) if _wc(s["text"]) > 12]
@@ -732,7 +736,7 @@ def recommendations(run: ParsedRun, dur: float, scores: dict) -> list:
 
     if scores["visual_flow"] < 7:
         recs.append(
-            "VISUAL: Some scenes exceed 6s on a single image — static effect. "
+            "VISUAL: Some scenes exceed 6s on a single image -- static effect. "
             "Subdivide long sentences or add a second image query per scene."
         )
 
@@ -740,7 +744,7 @@ def recommendations(run: ParsedRun, dur: float, scores: dict) -> list:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# STEP 10 — Write report
+# STEP 10 -- Write report
 # ═════════════════════════════════════════════════════════════════════════════
 
 def _bar(s, w=20):
@@ -794,7 +798,7 @@ def write_report(run: ParsedRun, dur: float, scores: dict,
     A(f"> **Context detected:** `{run.context}`")
     A("")
     if mismatches:
-        A("> ⚠️ **EXECUTION MISMATCH DETECTED** — see Issues section")
+        A("> WARNING:️ **EXECUTION MISMATCH DETECTED** -- see Issues section")
         A("")
     A("---")
     A("")
@@ -802,7 +806,7 @@ def write_report(run: ParsedRun, dur: float, scores: dict,
     # ── Summary ───────────────────────────────────────────────────────────
     A("## 🎯 Summary Score")
     A("")
-    A(f"### Overall: **{ov}/10** — {_grade(ov, issues)}")
+    A(f"### Overall: **{ov}/10** -- {_grade(ov, issues)}")
     A("")
     A(f"{_bar(ov)}")
     A("")
@@ -828,7 +832,7 @@ def write_report(run: ParsedRun, dur: float, scores: dict,
     A(f"| Path | `output/news_video.mp4` |")
     A(f"| Size | {file_meta['size_bytes'] / 1024 / 1024:.2f} MB |")
     A(f"| Modified | {datetime.fromtimestamp(file_meta['mtime']).strftime('%Y-%m-%d %H:%M:%S') if file_meta['mtime'] else 'N/A'} |")
-    A(f"| Belongs to this run | {'✅ YES' if file_meta['is_valid'] else '❌ NO — older file'} |")
+    A(f"| Belongs to this run | {'✅ YES' if file_meta['is_valid'] else '❌ NO -- older file'} |")
     A(f"| **Duration (MoviePy)** | **{dur:.2f}s** |")
     A(f"| Target duration | 45–55s |")
     A(f"| Duration status | {'✅ On target' if 40 <= dur <= 60 else '🚨 OFF TARGET'} |")
@@ -913,7 +917,7 @@ def write_report(run: ParsedRun, dur: float, scores: dict,
 
     # ── Mismatch detail ───────────────────────────────────────────────────
     if mismatches:
-        A("## ⚠️ Execution Mismatch Detail")
+        A("## WARNING:️ Execution Mismatch Detail")
         A("")
         for m in mismatches:
             A(f"- {m}")
@@ -921,7 +925,7 @@ def write_report(run: ParsedRun, dur: float, scores: dict,
         A("---")
         A("")
 
-    A("*Report generated by `video_review.py` — Strict pipeline execution + review*")
+    A("*Report generated by `video_review.py` -- Strict pipeline execution + review*")
 
     content = "\n".join(L)
     with open(REPORT_PATH, "w", encoding="utf-8") as f:
@@ -935,7 +939,7 @@ def write_report(run: ParsedRun, dur: float, scores: dict,
 
 def main():
     print("\n" + "═" * 60)
-    print("  AI VIDEO REVIEW SYSTEM — Strict Execution Mode")
+    print("  AI VIDEO REVIEW SYSTEM -- Strict Execution Mode")
     print("  Venv: .venv\\Scripts\\python.exe")
     print("  Entry: main.py")
     print("═" * 60)
@@ -952,7 +956,7 @@ def main():
     stdout_lines, exit_code, elapsed = run_main_pipeline()
 
     if exit_code != 0:
-        print(f"[REVIEW] ⚠️  main.py exited with code {exit_code} — reviewing any output.")
+        print(f"[REVIEW] WARNING:️  main.py exited with code {exit_code} -- reviewing any output.")
 
     # ── Verify output file ────────────────────────────────────────────────
     print("\n[REVIEW] Verifying output file…")
@@ -960,7 +964,7 @@ def main():
     if not file_meta["is_valid"]:
         print("[REVIEW] ❌ news_video.mp4 was not produced by this run (missing or stale).")
     else:
-        print(f"[REVIEW] ✅ news_video.mp4 confirmed — {file_meta['size_bytes']//1024} KB")
+        print(f"[REVIEW] ✅ news_video.mp4 confirmed -- {file_meta['size_bytes']//1024} KB")
 
     # ── Duration via MoviePy ──────────────────────────────────────────────
     print("\n[REVIEW] Reading video duration via MoviePy…")

@@ -1,0 +1,9 @@
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+print("Importing scene_planner...")
+import scene_planner
+print("Imported scene_planner.")
+print("Importing image_fetcher...")
+import image_fetcher
+print("Imported image_fetcher.")

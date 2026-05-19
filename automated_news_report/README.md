@@ -219,30 +219,28 @@ python modules/video_builder.py
 ---
 
 ### 1 · News Fetcher (`feedparser` & `bs4`)
-Parses multiple RSS feeds (BBC, Sky, DW, AlJazeera, NDTV, Times of India) and scores headlines. Selects the most relevant article and extracts content.
+Parses multiple regional and international RSS feeds (BBC, Sky News, Deutsche Welle, Al Jazeera, NDTV, Times of India, and ESPN) and scores headlines. Selects the most relevant, high-impact article, executes direct HTTP scrapers with auto-retries, and extracts clean, fact-dense content.
 
 ### 2 · Script Generator (`Ollama Llama3` + `spaCy`)
-Uses a local LLM (Llama3 via Ollama) to rewrite the news content into a professional, engaging news script. Uses regex filtering to scrub LLM meta-commentary and trims orphan fragments.
+Uses a local LLM (Llama3 via Ollama) to write professional social narrations using a **Dynamic Context-Aware Prompt Architecture**. Ollama is dynamically prompted with custom structural requirements depending on whether the article is tagged as `tense/serious` (disasters/conflict), `politics` (legislation/diplomacy), or `positive/informative/neutral` (launches/discoveries), preventing hallucinations and ensuring brand alignment. A strict regex normalizer scrubs AI meta-commentary, while a spaCy-based extractive generator serves as a 100% factual fallback.
 
 ### 3 · Scene Planner (`spaCy`)
-Splits the script into scenes. Extracts context, named entities (NER), geographic locations, and scene types (war, politics, tech). Geocodes locations for map stinger generation.
+Splits the generated news script into caption-friendly visual scenes. Uses NLP Named Entity Recognition (NER) to extract key organizations, events, people, and geographic locations. Derives a three-tier country context for map stingers and generates scene-specific search queries.
 
-### 4 · Image Fetcher (DuckDuckGo / Pexels / Wiki)
-Fetches realistic news photos via DuckDuckGo (Primary) or Unsplash/Pexels/Wikipedia. Applies strict anti-clipart/toy filters to maintain journalistic integrity. Fetches alt images for mid-scene visual cuts.
+### 4 · Image Fetcher (DuckDuckGo / Pexels / Wiki / AI)
+Fetches high-impact portrait (9:16) visuals. Realism and journalistic credibility are prioritized:
+* **Local Cache Validation:** Queries a hash of the scene keyword before hit APIs to reuse existing images instantly.
+* **Map Image Cache Lock:** Skips slow geocoding/drawing by instantly loading pre-compiled location maps.
+* **Layered Priorities:** Searches Wikipedia person photo (P1), Pexels news-realistic photography (P1.5), Wikipedia topic fallback (P2), Unsplash (P3), and Pollinations.ai contextual AI images (P5.5 fallback) with strict clipart/toy rejection filters.
 
 ### 5 · Voice Generator (Kokoro TTS / Piper)
-Generates high-quality narration using Kokoro TTS (with a numpy 2.x patch applied for safety). If Kokoro is missing, gracefully falls back to local Piper TTS.
+Generates stunning, human-quality voice overs using **Kokoro TTS** (`hexgrad/Kokoro-82M` neural model) with custom voice and speed mappings tailored to the emotional context (e.g., British male gravitas for conflict, energetic female for achievements). Integrates automatic loudnorm normalization to EBU R128 (-23 LUFS) and decibel-level silence trimming (80ms natural decay tail). Piper TTS serves as a fast local ONNX fallback.
 
-### 6 · Video Builder (`MoviePy`)
-For each scene:
-* Adds geographic map stingers for location context.
-* Loads background images → resizes to 1080×1920 with Ken Burns zoom effects.
-* Applies visual cuts midway through longer scenes.
-* Renders synchronized captions.
-* Attaches generated WAV audio.
-* Appends a dynamically calculated animated outro scene.
+### 6 · Video Builder (`MoviePy` + `Pillow`)
+Composes H.264 / AAC vertical MP4s. Applies Gaussian blurs, Ken Burns zooms, and mid-scene visual cuts. Automatically appends animated overlays, brand banners, and a dynamic call-to-action outro. 
+* **Dynamic Scene Drop:** If a timeline compression ratio drops below $0.95$, the builder dynamically drops middle scenes (keeping hook and conclusion) and recalculates all boundaries to eliminate caption overlap and narration cutoffs completely.
 
-All scenes are concatenated and exported as `libx264` / `aac` MP4.
+---
 
 ---
 
@@ -296,24 +294,25 @@ This repository builds a full local AI news-to-video generator that converts the
 
 ### Technology used
 
-- Python 3
-- feedparser for RSS parsing
-- spaCy (`en_core_web_sm`) for NLP, summarisation, sentence splitting, and named entity recognition
-- MoviePy for video composition
-- Pillow for text rendering and graphic overlays
-- NumPy for timing and image array handling
-- Piper TTS with local ONNX voice model for audio generation
-- Pexels API for realistic photo sourcing
-- Wikipedia/Wikimedia API fallback for missing images
-- staticmap + geopy for generating location map stingers
-- ffmpeg (required by MoviePy)
+- Python 3.12+
+- feedparser & requests with retries for robust RSS parsing and article scraping
+- spaCy (`en_core_web_sm`) for advanced NLP, semantic categorization, sentence chunking, and named entity recognition (NER)
+- MoviePy for high-fidelity vertical video composition and rendering
+- Pillow for beautiful rounded text pills, gradient overlays, and dynamic brand elements
+- NumPy for sound array concatenation, timing calculations, and visual buffers
+- Kokoro TTS with a local PyTorch neural engine for high-quality professional voice narration
+- Piper TTS with a local ONNX runtime for an offline fallback voice engine
+- geopy, staticmap, and CartoDB for generating location map stingers
+- ffmpeg for EBU R128 (-23 LUFS) audio normalization, silence trimming, and H.264/AAC encoding
 
 ### Data sources and AI models
 
-- News source: BBC News RSS feed at `https://feeds.bbci.co.uk/news/rss.xml`
-- Image source: Pexels API (`https://www.pexels.com/api/`) with fallback to Wikipedia Commons
-- TTS model: `rhasspy/piper-voices` `en_US-lessac-medium.onnx`
-- NLP model: spaCy `en_core_web_sm`
+- **News feeds:** Multiple pools (BBC, Sky, DW, Reuters, NDTV, Times of India, ESPN, NASA RSS) categorized dynamically
+- **Image resources:** Pexels API, Wikipedia Commons, Unsplash, and Pollinations.ai (AI images)
+- **Local LLM Model:** Ollama `llama3` for news-narrative script writing and dynamic CTA outros
+- **Primary TTS Model:** Kokoro-82M neural model (`hexgrad/Kokoro-82M` repo)
+- **Fallback TTS Model:** Piper ONNX medium voice (`en_US-lessac-medium.onnx`)
+- **NLP Model:** spaCy `en_core_web_sm` (v3.x)
 
 ### What changed in this repo
 

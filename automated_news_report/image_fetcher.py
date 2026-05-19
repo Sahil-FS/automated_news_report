@@ -1,4 +1,4 @@
-# image_fetcher.py — Fetch images via Pexels API (primary) + Wikipedia (fallback)
+# image_fetcher.py -- Fetch images via Pexels API (primary) + Wikipedia (fallback)
 
 import sys
 import os
@@ -12,6 +12,9 @@ import math
 import requests
 from PIL import Image, ImageDraw
 from ddgs import DDGS
+
+_POLLINATIONS_FAILED_THIS_RUN = False
+_POLLINATIONS_FAIL_COUNT = 0
 
 def generate_location_map(location: str, output_path: str, coord_override: tuple = None) -> str | None:
     """
@@ -237,6 +240,10 @@ _USED_URLS = set()
 _USED_IMAGE_PATHS: set[str] = set()   # tracks saved file paths per run
 _USED_PEXELS_IDS: set[str] = set()    # tracks Pexels photo IDs per run
 
+import threading
+_FETCH_LOCK = threading.Lock()
+_PEXELS_ID_LOCK = threading.Lock()
+
 # ── Copyright-protected CDN domain blocklist ──────────────────────────
 # Images hosted on these domains are agency/news photos under strict
 # copyright. Downloading them for video publication triggers DMCA.
@@ -346,7 +353,7 @@ def _is_blocked_domain(url: str) -> bool:
     """
     Return True if the URL's domain matches any entry in _BLOCKED_DOMAINS.
     Checks both exact domain match and subdomain match.
-    This is the FIRST filter applied — before any path-level checks.
+    This is the FIRST filter applied -- before any path-level checks.
     """
     if not url:
         return False
@@ -380,13 +387,13 @@ def _extract_pexels_id(url: str) -> str:
 
 # ── Clipart and toy image rejection patterns ──────────────────────────
 # URLs containing these strings are almost always stock illustrations,
-# clipart, toy photos, or abstract graphics — never real news photos.
+# clipart, toy photos, or abstract graphics -- never real news photos.
 _CLIPART_URL_PATTERNS = [
     # Art styles that are not photojournalism
     "clipart", "clip-art", "illustration", "vector", "cartoon",
     "drawing", "graphic", "icon", "symbol", "diagram",
     "anime", "manga", "hentai", "doujin", "ecchi",
-    "webp",          # .webp files from art sites — often anime
+    "webp",          # .webp files from art sites -- often anime
     # Toy / product photos
     "toys", "toy-", "/toy/", "plastic", "figurine", "miniature",
     # Stock art platforms
@@ -412,7 +419,7 @@ def _is_clipart_url(url: str) -> bool:
     """
     Return True if the URL is from a blocked domain OR contains a
     path keyword indicating non-news content (clipart, shopping, anime, etc.)
-    Domain check runs first for performance — most rejections happen there.
+    Domain check runs first for performance -- most rejections happen there.
     """
     if not url:
         return True  # reject empty URLs
@@ -493,7 +500,7 @@ def _build_semantic_query(scene: dict) -> str:
         "significant","revealed","stressed","condemned","insisted","claimed",
     }
 
-    # Only extract CONCRETE NOUNS and PROPER NOUNS — skip verbs and abstractions
+    # Only extract CONCRETE NOUNS and PROPER NOUNS -- skip verbs and abstractions
     # A concrete noun describes something that can be photographed
     ABSTRACT_VERBS_AND_ADJ = {
         "according", "however", "despite", "although", "therefore", "furthermore",
@@ -516,13 +523,30 @@ def _build_semantic_query(scene: dict) -> str:
         "remote", "valuable", "foreign", "economic", "political", "social",
     }
 
+    # PHASE 18: Remove words that cause off-topic image results
+    # "body" = human anatomy in image search context, not government body
+    # "force" = military/police force, or physical force
+    # "clear" = glass/transparency, not political clarity
+    _IMAGE_AMBIGUOUS_WORDS = {
+        "body", "bodies", "force", "forces", "clear", "clearing",
+        "ground", "grounds", "base", "bases", "capital", "head",
+        "figure", "figures", "front", "back", "state", "states",
+        "lead", "leads", "case", "cases", "point", "points",
+        "run", "runs", "running", "stand", "stands", "holding",
+        "strike", "strikes", "striking", "target", "targets",
+        "show", "shows", "showing", "dozens", "hundreds", "thousands",
+        "videos", "video", "footage", "live", "latest", "updates",
+        "highlights", "told", "said", "added", "years", "year",
+        "since", "amid", "following", "news"
+    }
     words = []
     for word in text.split():
         clean = word.strip(".,!?-();:'\"").lower()
         if (clean not in stopwords
                 and clean not in ABSTRACT_VERBS_AND_ADJ
                 and len(clean) > 3
-                and not clean.isdigit()):
+                and not clean.isdigit()
+                and clean not in _IMAGE_AMBIGUOUS_WORDS):
             words.append(clean)
 
     # Build mandatory anchor: country + type
@@ -535,7 +559,7 @@ def _build_semantic_query(scene: dict) -> str:
         "general":    "news",
     }.get(scene_type, "news")
 
-    # Build the query in layers: anchor → person → keywords → suffix
+    # Build the query in layers: anchor -> person -> keywords -> suffix
     parts = []
     if country:
         parts.append(country)
@@ -650,7 +674,7 @@ def build_query(scene: dict) -> str | None:
     if scene_type == "disaster":
         return f"{keyword} disaster emergency news realistic photo"
 
-    # No override — let ranked query list handle it
+    # No override -- let ranked query list handle it
     return None
 
 
@@ -796,13 +820,13 @@ def _pexels_image_url(query: str, scene_type: str = "general") -> str | None:
     Returns None if API key is missing, quota exceeded, no results, or image rejected.
     """
     if PEXELS_API_KEY == "PASTE_YOUR_KEY_HERE" or not PEXELS_API_KEY:
-        print("[ImageFetcher] Pexels API key not set — skipping Pexels.")
+        print("[ImageFetcher] Pexels API key not set -- skipping Pexels.")
         return None
 
     params = urllib.parse.urlencode({
         "query":       query,
         "per_page":    5,
-        "orientation": "portrait",   # 9:16 — perfect for vertical video
+        "orientation": "portrait",   # 9:16 -- perfect for vertical video
     })
     url = f"{PEXELS_SEARCH}?{params}"
     import requests
@@ -834,20 +858,44 @@ def _pexels_image_url(query: str, scene_type: str = "general") -> str | None:
         if not img_url:
             continue
 
+        # PHASE 22: Lifestyle photo rejection for conflict/war queries.
+        # Pexels often returns lifestyle/people photos for geopolitical queries
+        # ("Ukraine", "Russia"). Check the photo's alt text against lifestyle indicators.
+        if scene_type == "war":
+            _LIFESTYLE_INDICATORS = {
+                "child", "children", "kids", "baby", "babies", "smile", "smiling",
+                "family", "mother", "father", "playing", "school", "student",
+                "cooking", "food", "restaurant", "shopping", "market", "flower",
+                "selfie", "wedding", "birthday", "party", "beach", "sunset",
+                "yoga", "fitness", "workout", "sport", "soccer", "football",
+                "dog", "cat", "pet", "animal", "nature", "garden", "park",
+                "office", "meeting", "business", "computer", "laptop",
+            }
+            _photo_alt = (
+                photo.get("alt", "") or
+                photo.get("photographer", "") or ""
+            ).lower()
+            _photo_desc = "".join((
+                photo.get("alt", "") or "",
+                photo.get("url", "") or "",
+            )).lower()
+            if any(ind in _photo_alt for ind in _LIFESTYLE_INDICATORS):
+                print(f"[PEXELS LIFESTYLE REJECT] War query but lifestyle image: '{_photo_alt[:60]}'")
+                continue
+
         # Check Pexels photo ID deduplication
         pexels_id = _extract_pexels_id(img_url)
-        if pexels_id and pexels_id in _USED_PEXELS_IDS:
-            print(f"[PEXELS DEDUP] Photo ID {pexels_id} already used — skipping")
-            continue
+        if pexels_id:
+            with _PEXELS_ID_LOCK:
+                if pexels_id in _USED_PEXELS_IDS:
+                    print(f"[PEXELS DEDUP] Photo ID {pexels_id} already used -- skipping")
+                    continue
+                _USED_PEXELS_IDS.add(pexels_id)
 
         # Apply quality filter for serious topics
         if _should_reject_image(img_url, query, scene_type):
             print(f"[ImageFetcher] Pexels: rejecting '{query}' (inappropriate)")
             continue
-
-        # Register this photo ID as used
-        if pexels_id:
-            _USED_PEXELS_IDS.add(pexels_id)
 
         print(f"[ImageFetcher] Pexels found '{query}' -> {img_url[:70]}...")
         return img_url
@@ -866,7 +914,11 @@ def fetch_wikipedia(query):
     url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{query}"
 
     try:
-        r = requests.get(url, timeout=10)
+        headers = {
+            "User-Agent": "NewsVideoBot/1.0 (educational project; contact: darshan@example.com)",
+            "Accept": "application/json"
+        }
+        r = requests.get(url, headers=headers, timeout=10)
         if r.status_code != 200:
             return None
 
@@ -880,7 +932,7 @@ def fetch_og_image(og_url: str, dest_path: str) -> bool:
     """
     Download a pre-captured og:image URL directly to dest_path.
     Returns True if the file was saved and is larger than 2 KB.
-    Returns False on any failure — never raises.
+    Returns False on any failure -- never raises.
 
     Used exclusively for Scene 00 so the video always opens with
     the journalist's chosen editorial photo for the story.
@@ -892,7 +944,7 @@ def fetch_og_image(og_url: str, dest_path: str) -> bool:
         if success and os.path.exists(dest_path):
             size_kb = os.path.getsize(dest_path) // 1024
             if size_kb >= 2:
-                print(f"[OG IMAGE] Downloaded {size_kb}KB → {dest_path}")
+                print(f"[OG IMAGE] Downloaded {size_kb}KB -> {dest_path}")
                 return True
             os.remove(dest_path)
     except Exception as exc:
@@ -917,7 +969,7 @@ def _extract_article_images(article_url: str, max_images: int = 5) -> list[str]:
       - Minimum image size: 30KB (rejects icons, thumbnails, ads)
       - Deduplicated: same URL appears at most once in result list
 
-    Returns empty list on any failure — never raises.
+    Returns empty list on any failure -- never raises.
     Never blocks the pipeline.
     """
     if not article_url or not article_url.startswith("http"):
@@ -930,7 +982,7 @@ def _extract_article_images(article_url: str, max_images: int = 5) -> list[str]:
     except ImportError:
         return []
 
-    # Patterns that indicate portrait/avatar/icon — reject these
+    # Patterns that indicate portrait/avatar/icon -- reject these
     _PORTRAIT_PATTERNS = [
         "avatar", "headshot", "portrait", "profile", "author",
         "byline", "icon", "logo", "badge", "thumbnail", "thumb",
@@ -1009,7 +1061,7 @@ def _extract_article_images(article_url: str, max_images: int = 5) -> list[str]:
                 if src.startswith("http") and _is_editorial_url(src):
                     candidates.append(src)
 
-            # Also try srcset — pick the largest resolution
+            # Also try srcset -- pick the largest resolution
             srcset = img.get("srcset", "")
             if srcset:
                 srcs_w = []
@@ -1084,7 +1136,7 @@ def fetch_duckduckgo(query: str) -> str | None:
                     if _is_clipart_url(img_url):
                         print(f"[DDG CLIPART] Rejected: {img_url[:70]}")
                         continue
-                    # Reject .webp files from DuckDuckGo — these are almost exclusively
+                    # Reject .webp files from DuckDuckGo -- these are almost exclusively
                     # from art hosting sites, not news photography
                     if img_url.lower().endswith(".webp"):
                         print(f"[DDG WEBP REJECT] Skipping .webp result: {img_url[:70]}")
@@ -1137,7 +1189,7 @@ def _download(img_url: str, dest_path: str) -> bool:
 
     size_kb = os.path.getsize(dest_path) // 1024
     if size_kb < 2:
-        print(f"[ImageFetcher] Download returned {size_kb} KB (too small) — discarding.")
+        print(f"[ImageFetcher] Download returned {size_kb} KB (too small) -- discarding.")
         os.remove(dest_path)
         return False
 
@@ -1149,7 +1201,7 @@ def _download(img_url: str, dest_path: str) -> bool:
             _w, _h = _img.size
             # Reject images smaller than 100x100 (icon/thumbnail/error page)
             if _w < 100 or _h < 100:
-                print(f"[ImageFetcher] Image too small ({_w}x{_h}) — discarding.")
+                print(f"[ImageFetcher] Image too small ({_w}x{_h}) -- discarding.")
                 os.remove(dest_path)
                 return False
             # Convert to RGB for color analysis
@@ -1169,11 +1221,30 @@ def _download(img_url: str, dest_path: str) -> bool:
             if (max(_r_vals) - min(_r_vals) < 10 and
                     max(_g_vals) - min(_g_vals) < 10 and
                     max(_b_vals) - min(_b_vals) < 10):
-                print(f"[ImageFetcher] Solid-color image detected — discarding.")
+                print(f"[ImageFetcher] Solid-color image detected -- discarding.")
+                os.remove(dest_path)
+                return False
+
+            _sample_pixels = []
+            for _si in range(5):
+                for _sj in range(5):
+                    _sx = int(_w * (_si + 1) / 6)
+                    _sy = int(_h * (_sj + 1) / 6)
+                    _sample_pixels.append(_rgb.getpixel((_sx, _sy)))
+            _avg_brightness = sum(
+                (p[0] + p[1] + p[2]) / 3
+                for p in _sample_pixels
+            ) / len(_sample_pixels)
+            if _avg_brightness > 210:
+                print(f"[ImageFetcher] Very bright background ({_avg_brightness:.0f}/255) -- discarding.")
+                os.remove(dest_path)
+                return False
+            if _avg_brightness < 15:
+                print(f"[ImageFetcher] Too dark ({_avg_brightness:.0f}/255) -- discarding.")
                 os.remove(dest_path)
                 return False
     except Exception as _val_exc:
-        print(f"[ImageFetcher] Image validation error: {_val_exc} — discarding.")
+        print(f"[ImageFetcher] Image validation error: {_val_exc} -- discarding.")
         if os.path.exists(dest_path):
             os.remove(dest_path)
         return False
@@ -1183,116 +1254,8 @@ def _download(img_url: str, dest_path: str) -> bool:
 
 
 def fetch_ai_generated(scene: dict, dest_path: str) -> bool:
-    """
-    Generate an image using Pollinations.ai (free, no API key).
-    Triggered when ALL web sources fail or return un-downloadable URLs.
-    Builds a detailed photojournalistic prompt from scene NER + scene type.
-    """
-    import urllib.parse
-    import requests as _req
-    import time
-
-    entities = scene.get("entities", {})
-    country = entities.get("country_context", "")
-    person = entities.get("person", "")
-    scene_type = scene.get("type", "general")
-    scene_text = scene.get("text", "")
-
-    # Extract 2-3 concrete topic words from scene text for prompt specificity
-    _topic_words = []
-    _skip = {
-        "the","a","an","is","are","was","were","and","or","but","in","on",
-        "at","to","for","of","with","by","from","as","it","this","that",
-        "has","have","had","will","would","could","should","been","being",
-    }
-    for word in scene_text.split():
-        clean = word.strip(".,!?;:()").lower()
-        if len(clean) > 4 and clean not in _skip and not clean.isdigit():
-            _topic_words.append(clean)
-        if len(_topic_words) >= 3:
-            break
-
-    # Professional photojournalistic style descriptors per scene type
-    TYPE_PROMPTS = {
-        "war": (
-            "military soldiers conflict zone, news wire photo, AP photojournalism style, "
-            "dramatic lighting, documentary realism, high contrast, cinematic 35mm"
-        ),
-        "politics": (
-            "government official press conference podium, Reuters news photo, "
-            "professional lighting, journalistic documentary style, high resolution"
-        ),
-        "technology": (
-            "technology innovation laboratory modern, science journalism photo, "
-            "clean professional lighting, editorial stock photo style"
-        ),
-        "business": (
-            "financial business district skyline professionals, Bloomberg editorial photo, "
-            "corporate documentary style, sharp focus"
-        ),
-        "disaster": (
-            "emergency response disaster scene, photojournalism documentary, "
-            "dramatic natural lighting, crisis coverage style"
-        ),
-        "general": (
-            "news event documentary photo, editorial photojournalism, "
-            "professional news photography, realistic, sharp"
-        ),
-    }
-
-    style = TYPE_PROMPTS.get(scene_type, TYPE_PROMPTS["general"])
-
-    # Build location + subject anchor
-    anchors = []
-    if country:
-        anchors.append(country)
-    if person and len(person.split()) <= 3:
-        anchors.append(person)
-    if _topic_words:
-        anchors.extend(_topic_words[:2])
-
-    anchor_str = " ".join(anchors)
-    prompt = f"{anchor_str} {style}, 4K resolution, no watermark, no text overlay, portrait orientation 9:16"
-
-    # Clean the prompt
-    prompt = " ".join(prompt.split())  # normalize whitespace
-
-    encoded = urllib.parse.quote(prompt)
-    # Use seed based on scene index for reproducible results per scene
-    seed = hash(scene_text) % 10000
-    url = f"https://image.pollinations.ai/prompt/{encoded}?width=1080&height=1920&nologo=true&seed={seed}"
-
-    print(f"[AI GEN] Prompt: '{prompt[:80]}...'")
-
-    for attempt in range(2):
-        try:
-            r = _req.get(url, timeout=45)
-            if r.status_code == 200:
-                # Validate: must be larger than 10KB and start with JPEG/PNG magic bytes
-                if len(r.content) < 10000:
-                    print(f"[AI GEN] Response too small ({len(r.content)} bytes) — likely error page")
-                    time.sleep(2)
-                    continue
-                # Check magic bytes: JPEG starts with FF D8 FF, PNG starts with 89 50 4E 47
-                magic = r.content[:4]
-                if magic[:2] != b'\xff\xd8' and magic != b'\x89PNG':
-                    print(f"[AI GEN] Response is not a valid image (magic: {magic.hex()})")
-                    time.sleep(2)
-                    continue
-                with open(dest_path, "wb") as f:
-                    f.write(r.content)
-                size_kb = os.path.getsize(dest_path) // 1024
-                print(f"[AI GEN] Generated {size_kb}KB image saved: {os.path.basename(dest_path)}")
-                return True
-            else:
-                print(f"[AI GEN] HTTP {r.status_code} — attempt {attempt + 1}")
-                time.sleep(3)
-        except Exception as exc:
-            print(f"[AI GEN] Error on attempt {attempt + 1}: {exc}")
-            time.sleep(3)
-
-    print(f"[AI GEN] All attempts failed for scene")
-    return False
+    """Thin wrapper around the consolidated _ai_generate_contextual_image."""
+    return _ai_generate_contextual_image(scene, dest_path)
 
 
 def clean_query(q: str) -> str:
@@ -1370,19 +1333,147 @@ def clean_keyword(keyword):
     return " ".join(words[:4])
 
 # ── Public entry-point ────────────────────────────────────────────────────────
+def _ai_generate_contextual_image(scene: dict, dest_path: str) -> bool:
+    """
+    Generate a contextual news image via Pollinations.ai (free, no API key).
+    Returns True if a valid image was saved to dest_path.
+    """
+    import urllib.parse
+    import requests as _req
+    import os
+    import time
+
+    # Build a descriptive photojournalistic prompt
+    _entities = scene.get("entities", {}) or {}
+    _country  = _entities.get("country_context", "") or ""
+    _person   = _entities.get("person", "") or ""
+    _type     = scene.get("type", "general")
+    _text     = scene.get("text", "") or ""
+    _keyword  = scene.get("keyword", "") or ""
+
+    # Extract concrete nouns from scene text
+    _SKIP = {
+        "the","a","an","is","are","was","were","and","or","but","in","on",
+        "at","to","for","of","with","by","from","as","it","this","that",
+        "has","have","had","will","would","could","should","been","being",
+        "said","told","noted","added","confirmed","reported","announced",
+    }
+    _topic_words = []
+    for _w in (_keyword + " " + _text).split():
+        _c = _w.strip(".,!?;:()").lower()
+        if len(_c) > 4 and _c not in _SKIP and not _c.isdigit():
+            _topic_words.append(_c)
+        if len(_topic_words) >= 4:
+            break
+
+    # Style by scene type
+    _STYLE = {
+        "war":        "military conflict zone AP photojournalism dramatic lighting 35mm",
+        "politics":   "government press conference Reuters news photo professional",
+        "disaster":   "emergency response crisis scene documentary natural lighting",
+        "business":   "financial district Bloomberg editorial corporate documentary",
+        "technology": "modern technology laboratory science journalism editorial",
+        "general":    "news event editorial photojournalism professional realistic",
+    }
+    _style = _STYLE.get(_type, _STYLE["general"])
+
+    _parts = []
+    if _country:
+        _parts.append(_country)
+    if _person and len(_person.split()) <= 3:
+        _parts.append(_person)
+    _parts.extend(_topic_words[:3])
+    _parts.append(_style)
+    _parts.append("4K no watermark no text portrait 9:16")
+
+    _prompt = " ".join(_parts)
+    _encoded = urllib.parse.quote(_prompt[:300])
+    import hashlib
+    _seed = int(hashlib.md5(_text.encode("utf-8")).hexdigest(), 16) % 99999
+    _url = (
+        f"https://image.pollinations.ai/prompt/{_encoded}"
+        f"?width=1080&height=1920&nologo=true&seed={_seed}"
+    )
+
+    global _POLLINATIONS_FAILED_THIS_RUN, _POLLINATIONS_FAIL_COUNT
+    with _FETCH_LOCK:
+        if _POLLINATIONS_FAILED_THIS_RUN:
+            print("[AI-IMG] Pollinations is globally disabled this run (previous failures).")
+            return False
+
+    _backoff_timeouts = [15, 25]  # PHASE 19: reduced timeouts with exponential backoff
+    for _attempt, _timeout in enumerate(_backoff_timeouts):
+        try:
+            _r = _req.get(_url, timeout=_timeout, stream=False)
+            if _r.status_code == 200:
+                _content = _r.content
+                # Validate: must be at least 10KB and be a real image
+                if len(_content) < 10_000:
+                    time.sleep(2)
+                    continue
+                _magic = _content[:4]
+                if _magic[:2] != b'\xff\xd8' and _magic[:4] != b'\x89PNG':
+                    time.sleep(2)
+                    continue
+                with open(dest_path, "wb") as _f:
+                    _f.write(_content)
+                _kb = os.path.getsize(dest_path) // 1024
+                print(f"[AI-IMG] Generated {_kb}KB: '{_prompt[:60]}'")
+                with _FETCH_LOCK:
+                    _POLLINATIONS_FAIL_COUNT = 0
+                return True
+        except Exception as _exc:
+            print(f"[AI-IMG] Attempt {_attempt+1} failed (timeout={_timeout}s): {_exc}")
+            time.sleep(2 * (_attempt + 1))
+
+    with _FETCH_LOCK:
+        _POLLINATIONS_FAIL_COUNT += 1
+        if _POLLINATIONS_FAIL_COUNT >= 2:
+            print("[AI-IMG] CRITICAL: Pollinations failed twice. Disabling for the rest of the run.")
+            _POLLINATIONS_FAILED_THIS_RUN = True
+
+    return False
+
+
 def fetch_image(scene: dict, index: int) -> str | None:
-    global _USED_IMAGE_PATHS, _USED_PEXELS_IDS
+    global _USED_IMAGE_PATHS, _USED_PEXELS_IDS, _POLLINATIONS_FAILED_THIS_RUN, _POLLINATIONS_FAIL_COUNT
     # Reset registry only on scene 0 (start of a new video run)
     if index == 0:
-        _USED_IMAGE_PATHS.clear()
-        _USED_PEXELS_IDS.clear()
-        if hasattr(fetch_image, "_article_img_cache"):
-            fetch_image._article_img_cache = {}
-        if hasattr(fetch_image, "_article_img_index"):
-            fetch_image._article_img_index = {}
-        print("[DEDUP] Asset registry cleared for new run")
+        with _FETCH_LOCK:
+            _USED_IMAGE_PATHS.clear()
+            _USED_PEXELS_IDS.clear()
+            _POLLINATIONS_FAILED_THIS_RUN = False
+            _POLLINATIONS_FAIL_COUNT = 0
+            if hasattr(fetch_image, "_article_img_cache"):
+                fetch_image._article_img_cache = {}
+            if hasattr(fetch_image, "_article_img_index"):
+                fetch_image._article_img_index = {}
+            print("[DEDUP] Asset registry cleared for new run")
+
+    # PHASE 20: Map Image Local Cache Lock
+    # If this is the map stinger context, verify if we already have the map image
+    # generated in this run to avoid geopy/CartoDB API abuse.
+    _map_path = scene.get("map_image_path")
+    if _map_path and os.path.exists(_map_path) and os.path.getsize(_map_path) > 10240:
+        print(f"[MAP CACHE HIT] Map image exists: {_map_path}")
+        _USED_IMAGE_PATHS.add(_map_path)
+        return _map_path
 
     keyword  = scene.get("keyword", "")
+    # PHASE 18: Strip ambiguous nouns from image queries
+    _AMBIGUOUS = {
+        "body", "bodies", "force", "forces", "clear", "clearing",
+        "ground", "grounds", "base", "bases", "capital", "head",
+        "figure", "figures", "front", "back", "state", "states",
+        "lead", "leads", "case", "cases", "point", "points",
+        "run", "runs", "running", "stand", "stands", "holding",
+        "strike", "strikes", "striking", "target", "targets",
+        "show", "shows", "showing", "dozens", "hundreds", "thousands",
+        "videos", "video", "footage", "live", "latest", "updates",
+        "highlights", "told", "said", "added", "years", "year",
+        "since", "amid", "following", "news"
+    }
+    keyword = " ".join(w for w in keyword.split() if w.lower() not in _AMBIGUOUS)
     keyword  = clean_keyword(keyword)
     sentence = scene.get("text", "")
     scene_type = scene.get("type", "general")
@@ -1417,8 +1508,8 @@ def fetch_image(scene: dict, index: int) -> str | None:
     }
 
     # ── Scene-aware entity query builder ─────────────────────────────────
-    # Scenes 0 and 1 = establishing shots → use global Person + Location anchor.
-    # Scenes 2+      = detail shots       → use hybrid scene-level query.
+    # Scenes 0 and 1 = establishing shots -> use global Person + Location anchor.
+    # Scenes 2+      = detail shots       -> use hybrid scene-level query.
     entity_query = ""
 
     # Extract scene-level semantic keywords (top 3 meaningful words from text)
@@ -1438,7 +1529,7 @@ def fetch_image(scene: dict, index: int) -> str | None:
     scene_kw_str   = " ".join(scene_keywords)
 
     if index <= 1:
-        # Establishing scenes — global Person + Location anchor
+        # Establishing scenes -- global Person + Location anchor
         if person and location:
             entity_query = f"{person} {location} news photo"
         elif person and country_context:
@@ -1450,7 +1541,7 @@ def fetch_image(scene: dict, index: int) -> str | None:
             entity_query = f"{country_context} {scene_kw_str} news photo"
 
     else:
-        # Detail scenes — hybrid: country + scene content + type
+        # Detail scenes -- hybrid: country + scene content + type
         if country_context and scene_kw_str:
             # Build type-specific hybrid
             if scene_type == "war":
@@ -1512,6 +1603,56 @@ def fetch_image(scene: dict, index: int) -> str | None:
         query = clean_query(query)
         print(f"[TOPIC PREFIX] Applied: '{_topic_prefix}' -> {query[:80]}")
 
+    # PHASE 22: Conflict-zone image override.
+    # When the story is a conflict/war story AND the country is in a known conflict zone,
+    # force the Pexels query to use conflict-specific anchors instead of generic terms.
+    # This prevents lifestyle/people photos from being returned for war stories.
+    _CONFLICT_ZONES = {
+        "ukraine", "russia", "israel", "gaza", "palestine", "iran", "syria",
+        "yemen", "sudan", "ethiopia", "myanmar", "afghanistan", "iraq",
+        "lebanon", "west bank", "taiwan",
+    }
+    _CONFLICT_HEADLINE_WORDS = {
+        "attack", "killed", "drone", "strike", "war", "troops", "missile",
+        "bomb", "military", "airstrike", "ceasefire", "invasion", "conflict",
+        "offensive", "shelling", "artillery", "casualties", "explosion",
+    }
+    _headline_lower = (scene.get("headline", "") or "").lower()
+    _country_lower = country_context.lower() if country_context else ""
+    _text_lower = sentence.lower()
+    _is_conflict_story = (
+        any(cz in _country_lower for cz in _CONFLICT_ZONES) or
+        any(cz in _text_lower for cz in _CONFLICT_ZONES)
+    ) and (
+        any(cw in _headline_lower for cw in _CONFLICT_HEADLINE_WORDS) or
+        any(cw in _text_lower for cw in _CONFLICT_HEADLINE_WORDS)
+    )
+    if _is_conflict_story and scene_type != "war":
+        print(f"[IMAGE OVERRIDE] Conflict zone '{country_context}' + conflict headline -> scene_type='war'")
+        scene_type = "war"
+    if _is_conflict_story:
+        _conflict_kws = " ".join(scene_keywords[:2]) if scene_keywords else ""
+        if country_context and _conflict_kws and _conflict_kws.lower() not in country_context.lower():
+            entity_query = f"{country_context} {_conflict_kws} war conflict news photo"
+        else:
+            _country_anchor = country_context if country_context else "military"
+            _QUERY_VARIATIONS = [
+                f"{_country_anchor} military airstrike news photo",
+                f"{_country_anchor} conflict zone destruction news photo",
+                f"{_country_anchor} soldiers troops military news photo",
+                f"{_country_anchor} war aftermath damage news photo",
+                f"{_country_anchor} missile drone attack news photo",
+                f"{_country_anchor} military operation forces news photo",
+                f"{_country_anchor} conflict casualties emergency news photo",
+                f"{_country_anchor} war crisis military news photo",
+                f"{_country_anchor} armed forces operation news photo",
+                f"{_country_anchor} battlefield conflict scene news photo",
+            ]
+            entity_query = _QUERY_VARIATIONS[index % len(_QUERY_VARIATIONS)]
+
+        print(f"[IMAGE OVERRIDE] War override (scene {index}): '{entity_query[:60]}'")
+        query = clean_query(entity_query)
+
     if article_url and index >= 2:
         # PHASE 10: Standardized cache key length to 50 chars
         _og_cache_key = f"_og_result_{article_url[:50]}"
@@ -1531,9 +1672,14 @@ def fetch_image(scene: dict, index: int) -> str | None:
             else:
                 _USED_URLS.add(_og_fail_key)
         if _og_context_url:
+            _url_lower = _og_context_url.lower()
+            _is_news_domain = any(dom in _url_lower for dom in [
+                "bbc", "reuters", "cnn", "nytimes", "apnews", "bloomberg",
+                "theguardian", "independent", "ndtv", "aljazeera", "cnbc"
+            ])
             _url_filename = _og_context_url.rstrip("/").split("/")[-1].split(".")[0]
             _has_uuid = bool(__import__("re").match(r"^[0-9a-f\-]{20,}$", _url_filename))
-            if _has_uuid:
+            if _has_uuid or not _is_news_domain:
                 og_context_words = ""
             else:
                 import os as _os
@@ -1567,6 +1713,13 @@ def fetch_image(scene: dict, index: int) -> str | None:
     cache_key = hashlib.md5(f"{query}|{sentence}".encode()).hexdigest()[:10]
     dest = os.path.join(IMAGE_DIR, f"scene_{index:02d}_{cache_key}.jpg")
 
+    # PHASE 20: If cache exists and is valid, reuse it rather than calling APIs again
+    # unless FORCE_REFRESH is explicitly set to True
+    if os.path.exists(dest) and os.path.getsize(dest) > 10240 and not FORCE_REFRESH:
+        print(f"[CACHE HIT] Reusing existing image for scene {index}: {dest}")
+        _USED_IMAGE_PATHS.add(dest)
+        return dest
+
     if os.path.exists(dest):
         os.remove(dest)
         print(f"[CACHE] Deleted stale cache to force refresh: {dest}")
@@ -1578,7 +1731,7 @@ def fetch_image(scene: dict, index: int) -> str | None:
     image_url = None
     source = "none"
 
-    # ── Priority 0: Editorial og:image — Scene 00 ONLY ───────────────
+    # ── Priority 0: Editorial og:image -- Scene 00 ONLY ───────────────
     # fetch_og_image() returns bool (True/False), not a URL string.
     # The pre-captured URL is in scene["og_image_url"].
     # We use _og_url (the string) for logging, not the bool return.
@@ -1603,12 +1756,12 @@ def fetch_image(scene: dict, index: int) -> str | None:
                 print(f"[P0] Editorial og:image: {_og_url[:70]}")
                 return _og_dest
             else:
-                print("[P0] og:image download failed — falling through to P1")
+                print("[P0] og:image download failed -- falling through to P1")
         else:
-            print("[P0] No og_image_url in scene — falling through to P1")
+            print("[P0] No og_image_url in scene -- falling through to P1")
 
     # ── Priority 0.5: Article editorial images (scenes 1–4) ──────────────────
-    # Uses images scraped from the article page — highest editorial relevance.
+    # Uses images scraped from the article page -- highest editorial relevance.
     # Runs ONLY if we haven't already found an image above.
     if not image_url and article_url and 1 <= index <= 4:
         # Thread-safe: use a module-level dict keyed by article_url
@@ -1653,8 +1806,9 @@ def fetch_image(scene: dict, index: int) -> str | None:
                 if os.path.exists(_art_dest):
                     os.remove(_art_dest)
 
-        # All article images exhausted — fall through to Pexels
-        print(f"[P0.5] No unique article images left — falling through to Pexels")
+        # All article images exhausted - fall through to AI image generation
+        print(f"[P0.5] No unique article images left - falling through to AI generation")
+
 
 
 
@@ -1693,7 +1847,7 @@ def fetch_image(scene: dict, index: int) -> str | None:
     if not image_url:
         _ddg_url = fetch_duckduckgo(query)
         if _ddg_url and _is_clipart_url(_ddg_url):
-            print(f"[P2] DuckDuckGo: clipart rejected — {_ddg_url[:60]}")
+            print(f"[P2] DuckDuckGo: clipart rejected -- {_ddg_url[:60]}")
             _ddg_url = None
         if _ddg_url:
             image_url = _ddg_url
@@ -1727,6 +1881,17 @@ def fetch_image(scene: dict, index: int) -> str | None:
         image_url = fetch_wikipedia(query)
         source = "wiki" if image_url else source
 
+    # -- Priority 5.5: AI-generated contextual image (Pollinations.ai) ----------
+    # PHASE 16/20: Generates a custom image from scene context, more relevant than generic stock.
+    # Scene 0 always uses the OG editorial image, so AI gen skips scene 0.
+    # Flipped priority: runs after web/Pexels and Wikipedia search before generic AI fallback.
+    if not image_url and index >= 1:
+        _ai_dest = os.path.join(IMAGE_DIR, f"scene_{index:02d}_ai_generated.jpg")
+        if _ai_generate_contextual_image(scene, _ai_dest):
+            _USED_IMAGE_PATHS.add(_ai_dest)
+            print(f"[P5.5] AI-generated contextual image for scene {index}")
+            return _ai_dest
+
     # ── Priority 6: AI Image Generation (Pollinations.ai, free) ─────────────
     if not image_url:
         ai_dest = os.path.join(IMAGE_DIR, f"scene_{index:02d}_ai.jpg")
@@ -1737,13 +1902,13 @@ def fetch_image(scene: dict, index: int) -> str | None:
 
     # ── Priority 7: Last resort ──────────────────────────────────────────
     if not image_url:
-        print("[ERROR] No image found — using fallback")
+        print("[ERROR] No image found -- using fallback")
         image_url = fetch_fallback(query)
         source = "fallback"
 
     if image_url in _USED_URLS:
-        print("[ImageFetcher] Duplicate image detected — trying Wikipedia fallback")
-        # Try Wikipedia first — more likely to have topic-relevant thumbnail
+        print("[ImageFetcher] Duplicate image detected -- trying Wikipedia fallback")
+        # Try Wikipedia first -- more likely to have topic-relevant thumbnail
         wiki_url = fetch_wikipedia(keyword)
         if wiki_url and wiki_url not in _USED_URLS:
             image_url = wiki_url
@@ -1764,7 +1929,7 @@ def fetch_image(scene: dict, index: int) -> str | None:
                     print(f"[ImageFetcher] Alt query fallback found: {vq}")
                     break
             if not fallback_found:
-                # Last resort — generic Unsplash fallback
+                # Last resort -- generic Unsplash fallback
                 image_url = fetch_fallback(query + " " + str(index))
                 print(f"[ImageFetcher] Using generic fallback for scene {index}")
 
@@ -1798,15 +1963,15 @@ def fetch_image(scene: dict, index: int) -> str | None:
     success = download_with_retry(image_url, dest)
 
     if not success:
-        print("[RETRY FAILED] Primary source download failed — trying AI generation")
+        print("[RETRY FAILED] Primary source download failed -- trying AI generation")
         ai_dest = os.path.join(IMAGE_DIR, f"scene_{index:02d}_ai_fallback.jpg")
         if fetch_ai_generated(scene, ai_dest):
             print(f"[AI GEN] Fallback image generated for scene {index}")
             _USED_IMAGE_PATHS.add(ai_dest)
             return ai_dest
 
-        # Last resort — generic fallback URL
-        print("[AI GEN] Failed — using generic fallback URL")
+        # Last resort -- generic fallback URL
+        print("[AI GEN] Failed -- using generic fallback URL")
         image_url = fetch_fallback(query)
         if image_url and _is_blocked_url(image_url):
             print(f"[BLOCKED] Protected CDN detected - skipping")
@@ -1826,26 +1991,27 @@ def fetch_image(scene: dict, index: int) -> str | None:
     # the visual cut system would repeat the same image multiple times.
     # Trigger the blur-safety-net instead by returning None so
     # video_builder uses the high-contrast blurred previous frame.
-    if dest in _USED_IMAGE_PATHS:
-        print(
-            f"[DEDUP] Path '{os.path.basename(dest)}' already used "
-            f"this run - skipping to prevent asset loop"
-        )
-        return None
+    with _FETCH_LOCK:
+        if dest in _USED_IMAGE_PATHS:
+            print(
+                f"[DEDUP] Path '{os.path.basename(dest)}' already used "
+                f"this run - skipping to prevent asset loop"
+            )
+            return None
 
-    _USED_IMAGE_PATHS.add(dest)
+        _USED_IMAGE_PATHS.add(dest)
     return dest
 
 def download_with_retry(url, path, retries=2):
-    import requests
+    if not url:
+        return False
+    # Reroute to call _download() which implements user-agent, Referer, size, and dimensions validation
     for i in range(retries):
         try:
-            r = requests.get(url, timeout=10)
-            if r.status_code == 200:
-                with open(path, "wb") as f:
-                    f.write(r.content)
+            if _download(url, path):
                 return True
-        except:
+        except Exception as exc:
+            print(f"[ImageFetcher] download_with_retry attempt {i+1} failed: {exc}")
             continue
     return False
 

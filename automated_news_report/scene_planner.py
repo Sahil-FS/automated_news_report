@@ -17,12 +17,84 @@ def clean_caption_text(text):
     return text
 
 MIN_WORDS = 8
-MAX_WORDS = 14
-IDEAL_WORDS = 10
+MAX_WORDS = 18
+IDEAL_WORDS = 12
 
 # Scene duration bounds
 MIN_SCENE_DURATION = 4
 MAX_SCENE_DURATION = 6
+
+BAD_ENDINGS = {"the", "a", "an", "of", "to", "in", "on", "at", "for", "with", "from", "by", "and", "but", "or", "so", "yet", "nor", "as", "is", "are", "was", "were", "has", "have", "had", "will", "would", "should", "could"}
+
+ORPHAN_STARTERS = {"to", "in", "on", "at", "of", "for", "by", "with", "from", "including", "following", "according", "citing", "noting", "adding", "saying", "suggesting", "indicating", "marking", "seeking", "urging", "calling", "warning"}
+
+CONTINUATION_WORDS = {
+    "would", "could", "should", "will", "can", "shall", "may", "might", "must",
+    "that", "which", "who", "whose", "whom",
+    "and", "but", "or", "nor",
+    "is", "are", "was", "were", "has", "have", "had",
+    "to",
+    "officials", "authorities", "forces", "troops", "military",
+    "government", "authorities", "parliament", "ministry",
+    "president", "minister", "official", "spokesman", "spokesperson",
+    "attack", "attacks", "strike", "strikes", "bombing", "bombings",
+    "invasion", "offensive", "operation", "operations", "response",
+    "decision", "agreement", "deal", "talks", "sanctions", "arrest",
+    "election", "referendum", "vote", "summit", "meeting", "visit",
+}
+
+SCENE_BAD_FINALS = {
+    "at", "in", "on", "of", "for", "to", "by", "with", "from", "into", "onto", "over", "under", "than", "about", "through", "between", "among", "against", "during", "before", "after", "within", "without", "along", "across", "behind", "toward", "a", "an", "the", "and", "or", "but", "so", "yet", "nor", "as", "that", "which", "when", "while", "where", "whether", "what", "who", "if", "is", "are", "was", "were", "be", "been", "being", "have", "has", "had", "will", "would", "should", "could", "may", "might", "shall", "must", "can", "do", "did", "does", "no", "gun", "its", "their", "his", "her", "our", "your", "this", "these", "those", "such", "any", "some", "not", "high-profile", "well-known", "long-term", "short-term", "large-scale", "small-scale", "full-scale", "ever-present", "high-level", "top-level", "low-level", "work", "live", "travel", "move", "act", "help", "meet", "fight", "run", "come", "go", "stay", "leave", "join", "continue", "remain", "begin", "start", "end", "stop", "support", "oppose", "push", "pull", "cut", "raise", "lower", "more", "less", "greater", "fewer", "higher", "lower", "further", "significant", "substantial", "major", "notable", "including", "such", "especially", "particularly", "notably", "impose", "determine", "consider", "decide", "establish", "create", "build", "form", "make", "take", "give", "provide", "deliver", "produce", "generate", "develop", "implement", "execute", "conduct", "introduce", "propose", "suggest", "recommend", "require", "demand", "seek", "pursue", "achieve", "complete", "finish", "conclude", "announce", "declare", "confirm", "deny", "reject", "accept", "approve", "oppose", "challenge", "question", "investigate", "secure", "protect", "defend", "attack", "target", "strike", "strategic", "critical", "essential", "vital", "necessary", "important", "key", "initial", "primary", "secondary", "potential", "possible", "likely", "unprecedented", "catastrophic", "severe", "extreme", "urgent", "revealed", "stressed", "condemned", "insisted", "its", "their", "release", "demanding", "whose",
+    "leaving", "claiming", "taking", "causing", "bringing",
+    "killing", "injuring", "wounding", "destroying",
+    "highlighting", "threatening", "affecting", "including",
+    "regarding", "concerning", "following", "during",
+    "near", "around", "outside", "inside", "within",
+    "throughout", "across", "between", "among", "against",
+    "driven", "risen", "fallen", "grown", "shrunk",
+    "go", "let", "make", "take", "give", "keep",
+    "itself", "themselves", "himself", "herself",
+    "public",
+    "reduce", "increase", "prevent", "ensure", "address", "achieve",
+    "maintain", "support", "promote", "protect", "develop", "improve",
+    "provide", "establish",
+    "private", "official", "local", "national", "international",
+    "economic", "political",
+    "and", "or", "but", "nor", "a", "an", "the", "of", "in", "on",
+    "at", "to", "for", "from", "by", "with", "into", "onto", "upon",
+    "military", "young", "village", "hebrew", "camp", "occupied",
+    "northern", "eastern", "western", "southern",
+    "26", "27", "28", "29", "30", "31", "been",
+}
+
+_NATIONALITY_ADJECTIVES = {
+    "russian", "ukrainian", "iranian", "israeli", "palestinian",
+    "chinese", "american", "british", "french", "german", "indian",
+    "pakistani", "turkish", "syrian", "libyan", "yemeni", "sudanese",
+    "lebanese", "belarusian", "nato", "georgian",
+    "azerbaijani", "armenian", "moldovan", "japanese", "korean",
+    "north", "south",
+}
+SCENE_BAD_FINALS.update(_NATIONALITY_ADJECTIVES)
+
+_COUNTRY_NAMES = {
+    "iran", "russia", "ukraine", "china", "israel", "gaza", "iraq",
+    "syria", "afghanistan", "pakistan", "india", "turkey", "taiwan",
+    "myanmar", "ethiopia", "sudan", "lebanon", "jordan", "egypt",
+    "libya", "yemen", "somalia", "france", "germany", "britain",
+    "japan", "australia", "canada", "brazil", "mexico", "venezuela",
+    "cuba",
+}
+SCENE_BAD_FINALS.update(_COUNTRY_NAMES)
+
+_TIME_TRUNCATIONS = {
+    "late", "early", "recent", "previous", "former",
+    "current", "past", "next", "upcoming", "initial", "final",
+    "last", "first", "second", "third", "over", "under", "some",
+    "more", "less", "most", "many", "few", "several", "various",
+    "multiple", "another", "other",
+}
+SCENE_BAD_FINALS.update(_TIME_TRUNCATIONS)
 
 def extract_context_entities(script: str) -> dict:
     """
@@ -300,8 +372,6 @@ def _strict_chunk_sentence(sentence: str) -> list[str]:
     words = sentence.split()
     if len(words) <= MAX_WORDS:
         return [sentence]
-    BAD_ENDINGS = {"the", "a", "an", "of", "to", "in", "on", "at", "for", "with", "from", "by", "and", "but", "or", "so", "yet", "nor", "as", "is", "are", "was", "were", "has", "have", "had", "will", "would", "should", "could"}
-    ORPHAN_STARTERS = {"to", "in", "on", "at", "of", "for", "by", "with", "from", "including", "following", "according", "citing", "noting", "adding", "saying", "suggesting", "indicating", "marking", "seeking", "urging", "calling", "warning"}
     mid = len(words) // 2
     for offset in range(0, min(5, len(words) - mid)):
         for candidate in [mid + offset, mid - offset]:
@@ -310,6 +380,7 @@ def _strict_chunk_sentence(sentence: str) -> list[str]:
             right_first = words[candidate].lower().rstrip(",.;:")
             if right_first in ORPHAN_STARTERS: continue
             if left_last in BAD_ENDINGS: continue
+            if right_first in CONTINUATION_WORDS: continue
             if (words[candidate][0].isupper() and not words[candidate - 1].rstrip().endswith((",", ".", ";", ":")) and right_first not in ("the", "a", "an", "he", "she", "they", "it", "his", "her", "their", "its", "this", "that", "these", "those")):
                 continue
             if (len(words[:candidate]) >= MIN_WORDS and len(words[candidate:]) >= MIN_WORDS):
@@ -373,8 +444,9 @@ def _clean_scene_text(text: str) -> str:
     if re.match(r'^[Tt]o\s+["\u201c\u2018a-z]', text):
         text = re.sub(r'^[Tt]o\s+', '', text)
         if text and text[0].islower(): text = text[0].upper() + text[1:]
-    LEADING_PREP_ARTIFACT = r'^(of|to|from|with|by|at|in|on|for|into|onto|upon|over|under|through|about|after|before|during|among|between|against|along|across|behind|toward|within|without|beyond)\s+(?=[A-Z])'
-    text = re.sub(LEADING_PREP_ARTIFACT, '', text, flags=re.IGNORECASE)
+    if len(text.split()) <= 3:
+        LEADING_PREP_ARTIFACT = r'^(?i:of|to|from|with|by|at|in|on|for|into|onto|upon|over|under|through|about|after|before|during|among|between|against|along|across|behind|toward|within|without|beyond)\s+(?=[A-Z])'
+        text = re.sub(LEADING_PREP_ARTIFACT, '', text)
     text = re.sub(r'\bof The\b', 'of the', text); text = re.sub(r'\bto A\b', 'to a', text); text = re.sub(r'\bto The\b', 'to the', text); text = re.sub(r'\bof A\b', 'of a', text); text = re.sub(r'\bin The\b', 'in the', text); text = re.sub(r'\bby The\b', 'by the', text); text = re.sub(r'\bfor The\b', 'for the', text)
     SUBORD_CONJUNCTIONS = r'^(before|after|while|although|though|since|because|despite|following|amid|amidst|regarding|concerning|given|provided|unless|until|whenever|wherever|as long as|even though|even if)\s+'
     stripped_test = re.sub(SUBORD_CONJUNCTIONS, '', text, flags=re.IGNORECASE)
@@ -462,24 +534,20 @@ def plan_scenes(script: str) -> list[dict]:
             i += 2
         else: repaired.append(s); i += 1
     scenes = repaired
-    SCENE_BAD_FINALS = {
-        "at", "in", "on", "of", "for", "to", "by", "with", "from", "into", "onto", "over", "under", "than", "about", "through", "between", "among", "against", "during", "before", "after", "within", "without", "along", "across", "behind", "toward", "a", "an", "the", "and", "or", "but", "so", "yet", "nor", "as", "that", "which", "when", "while", "where", "whether", "what", "who", "if", "is", "are", "was", "were", "be", "been", "being", "have", "has", "had", "will", "would", "should", "could", "may", "might", "shall", "must", "can", "do", "did", "does", "no", "gun", "its", "their", "his", "her", "our", "your", "this", "these", "those", "such", "any", "some", "not", "high-profile", "well-known", "long-term", "short-term", "large-scale", "small-scale", "full-scale", "ever-present", "high-level", "top-level", "low-level", "work", "live", "travel", "move", "act", "help", "meet", "fight", "run", "come", "go", "stay", "leave", "join", "continue", "remain", "begin", "start", "end", "stop", "support", "oppose", "push", "pull", "cut", "raise", "lower", "more", "less", "greater", "fewer", "higher", "lower", "further", "significant", "substantial", "major", "notable", "including", "such", "especially", "particularly", "notably", "impose", "determine", "consider", "decide", "establish", "create", "build", "form", "make", "take", "give", "provide", "deliver", "produce", "generate", "develop", "implement", "execute", "conduct", "introduce", "propose", "suggest", "recommend", "require", "demand", "seek", "pursue", "achieve", "complete", "finish", "conclude", "announce", "declare", "confirm", "deny", "reject", "accept", "approve", "oppose", "challenge", "question", "investigate", "secure", "protect", "defend", "attack", "target", "strike", "strategic", "critical", "essential", "vital", "necessary", "important", "key", "initial", "primary", "secondary", "potential", "possible", "likely", "unprecedented", "catastrophic", "severe", "extreme", "urgent", "revealed", "stressed", "condemned", "insisted", "its", "their", "release", "demanding", "whose",
-        # PHASE 14: Confirmed from terminal log
-        "leaving", "claiming", "taking", "causing", "bringing",
-        "killing", "injuring", "wounding", "destroying",
-        "highlighting", "threatening", "affecting", "including",
-        "regarding", "concerning", "following", "during",
-        # Preposition-like endings that leave thought hanging
-        "near", "around", "outside", "inside", "within",
-        "throughout", "across", "between", "among", "against",
-    }
     def _scene_ends_incomplete(text: str) -> bool:
         clean = text.rstrip(".!?,;: ")
         if not clean: return False
         last_word = clean.split()[-1].lower()
+
+        # PHASE 20: Bare numbers as last word = truncated date/reference
+        import re as _ni_re
+        if _ni_re.match(r'^\d+$', last_word) and int(last_word) < 200:
+            return True
+
         if not text.rstrip().endswith((".", "!", "?")):
             if last_word in SCENE_BAD_FINALS: return True
         return last_word in SCENE_BAD_FINALS
+
     fixed_scenes = []; i = 0
     while i < len(scenes):
         scene = scenes[i]
@@ -487,7 +555,7 @@ def plan_scenes(script: str) -> list[dict]:
             next_scene = scenes[i + 1]
             merged_text = scene["text"].rstrip() + " " + next_scene["text"].lstrip()
             merged = {**next_scene, "text": merged_text, "type": scene["type"] if scene["type"] != "general" else next_scene["type"], "keyword": scene["keyword"]}
-            if len(merged["text"].split()) > 14:
+            if len(merged["text"].split()) > 20:
                 sub_chunks = _strict_chunk_sentence(merged["text"])
                 if len(sub_chunks) > 1:
                     valid_chunks = []; rescued_text = ""
@@ -500,7 +568,7 @@ def plan_scenes(script: str) -> list[dict]:
                             else: rescued_text += " " + chunk
                     if rescued_text.strip():
                         if valid_chunks: valid_chunks[-1] = valid_chunks[-1].rstrip() + " " + rescued_text.strip()
-                        else: valid_chunks = [" ".join(merged["text"].split()[:MAX_WORDS])]
+                        else: valid_chunks = [" ".join(merged["text"].split()[:20])]
                     for chunk in valid_chunks:
                         import re as _ra
                         _boundary = _ra.split(r'\.\s+(?=[A-Z])', chunk)
@@ -511,8 +579,53 @@ def plan_scenes(script: str) -> list[dict]:
                 else: fixed_scenes.append(merged)
             else: fixed_scenes.append(merged)
             i += 2
-        else: fixed_scenes.append(scene); i += 1
-    scenes = fixed_scenes
+        else:
+            # Fix 6: Backward merge last scene if it ends incomplete
+            if i == len(scenes) - 1 and _scene_ends_incomplete(scene["text"]) and fixed_scenes:
+                print(f"[ORPHAN RESCUE] Backward merging last scene: '{scene['text'][:40]}'")
+                prev_scene = fixed_scenes[-1]
+                prev_scene["text"] = prev_scene["text"].rstrip() + " " + scene["text"].lstrip()
+                if not prev_scene["text"].endswith((".", "!", "?")):
+                    prev_scene["text"] += "."
+            else:
+                fixed_scenes.append(scene)
+            i += 1
+
+    # PHASE 18: Final word count enforcement -- split any scene > MAX_WORDS
+    # This prevents 10.80s audio scenes that cause overlap in build_video()
+    _enforced = []
+    for _s in fixed_scenes:
+        _words = _s["text"].split()
+        if len(_words) > MAX_WORDS:
+            # Search backwards from MAX_WORDS for a clean grammatical break
+            _cut = None
+            for _ci in range(MAX_WORDS, max(MIN_WORDS, MAX_WORDS - 8), -1):
+                if _ci < len(_words):
+                    _pw = _words[_ci - 1].lower().rstrip(",.;:'\"")
+                    _cw = _words[_ci].lower().rstrip(",.;:'\"")
+                    if (_pw not in SCENE_BAD_FINALS and _pw not in BAD_ENDINGS) and \
+                       (_cw not in CONTINUATION_WORDS and _cw not in ORPHAN_STARTERS):
+                        _cut = _ci
+                        break
+
+            if _cut is not None:
+                _left  = " ".join(_words[:_cut])
+                _right = " ".join(_words[_cut:])
+                if not _left.rstrip().endswith((".", "!", "?")): _left += "."
+                if not _right.rstrip().endswith((".", "!", "?")): _right += "."
+
+                # Only split if both halves are meaningful
+                if len(_left.split()) >= MIN_WORDS and len(_right.split()) >= 3:
+                    _enforced.append({**_s, "text": _left})
+                    _enforced.append({**_s, "text": _right})
+                    print(f"[WORD CAP] Grammar split: '{_s['text'][:60]}' -> 2 scenes")
+                else:
+                    _enforced.append(_s)
+            else:
+                _enforced.append(_s)
+        else:
+            _enforced.append(_s)
+    scenes = _enforced
     if len(scenes) >= 3:
         scenes[0]["flow_role"] = "hook"; scenes[1]["flow_role"] = "context"; scenes[2]["flow_role"] = "event"
         for i in range(3, len(scenes)): scenes[i]["flow_role"] = "body"

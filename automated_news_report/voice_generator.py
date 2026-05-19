@@ -1,4 +1,4 @@
-# modules/voice_generator.py — Generate speech with Piper TTS via subprocess
+# modules/voice_generator.py -- Generate speech with Piper TTS via subprocess
 
 import os
 import subprocess
@@ -66,7 +66,7 @@ print(f"[VoiceGen] Run voice: '{_RUN_VOICE}' (context-aware override available)"
 # To enable Kokoro TTS (better voice quality, same ONNX-based offline execution):
 # pip install kokoro>=0.9.4 soundfile
 # Windows: winget install espeak-ng  (required phoneme backend)
-# Then re-run — Kokoro activates automatically, Piper stays as fallback
+# Then re-run -- Kokoro activates automatically, Piper stays as fallback
 KOKORO_AVAILABLE = False
 _KOKORO_FAIL_REASON = ""
 
@@ -79,14 +79,14 @@ try:
 except ImportError as _ke:
     _KOKORO_FAIL_REASON = str(_ke)
     KOKORO_AVAILABLE = False
-    print(f"[VoiceGen] Kokoro TTS: NOT AVAILABLE — {_KOKORO_FAIL_REASON}")
+    print(f"[VoiceGen] Kokoro TTS: NOT AVAILABLE -- {_KOKORO_FAIL_REASON}")
     print("[VoiceGen] To install Kokoro run these commands in your .venv:")
     print("  .venv\\Scripts\\pip.exe install kokoro>=0.9.4 soundfile")
     print("  winget install espeak-ng  (required phoneme backend)")
 except Exception as _ke:
     _KOKORO_FAIL_REASON = str(_ke)
     KOKORO_AVAILABLE = False
-    print(f"[VoiceGen] Kokoro TTS: ERROR during import — {_KOKORO_FAIL_REASON}")
+    print(f"[VoiceGen] Kokoro TTS: ERROR during import -- {_KOKORO_FAIL_REASON}")
 
 _kokoro_pipeline = None
 
@@ -94,27 +94,33 @@ _kokoro_pipeline = None
 PAUSE_AFTER_SENTENCE = 0.4  # seconds
 
 
+import threading
+_KOKORO_INIT_LOCK = threading.Lock()
+
 def _get_kokoro_pipeline():
     global _kokoro_pipeline, KOKORO_AVAILABLE
-    if _kokoro_pipeline is None:
-        try:
-            import warnings
-            import os
-            # Suppress Hugging Face Hub warnings for known model
-            os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
-            os.environ.setdefault("HF_HUB_DISABLE_IMPLICIT_TOKEN", "1")
-            os.environ.setdefault("TRANSFORMERS_NO_ADVISORY_WARNINGS", "1")
-            # Suppress the "unauthenticated requests" warning from huggingface_hub
-            import logging
-            logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
-            logging.getLogger("huggingface_hub.utils._headers").setLevel(logging.ERROR)
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                _kokoro_pipeline = KPipeline(lang_code='a', repo_id='hexgrad/Kokoro-82M')
-        except Exception as exc:
-            print(f"[Kokoro] Pipeline init failed: {exc}")
-            KOKORO_AVAILABLE = False
-            return None
+    if _kokoro_pipeline is not None:
+        return _kokoro_pipeline          # fast path, no lock needed
+    with _KOKORO_INIT_LOCK:
+        if _kokoro_pipeline is None:     # re-check inside lock
+            try:
+                import warnings
+                import os
+                # Suppress Hugging Face Hub warnings for known model
+                os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+                os.environ.setdefault("HF_HUB_DISABLE_IMPLICIT_TOKEN", "1")
+                os.environ.setdefault("TRANSFORMERS_NO_ADVISORY_WARNINGS", "1")
+                # Suppress the "unauthenticated requests" warning from huggingface_hub
+                import logging
+                logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
+                logging.getLogger("huggingface_hub.utils._headers").setLevel(logging.ERROR)
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    _kokoro_pipeline = KPipeline(lang_code='a', repo_id='hexgrad/Kokoro-82M')
+            except Exception as exc:
+                print(f"[Kokoro] Pipeline init failed: {exc}")
+                KOKORO_AVAILABLE = False
+                return None
     return _kokoro_pipeline
 
 
@@ -139,7 +145,7 @@ def generate_audio_kokoro(text, wav_path, context: str = "neutral") -> bool:
         for result in pipeline(text, voice=voice, speed=speed):
             # Kokoro 0.9.4 yields KPipeline.Result objects with a .audio
             # attribute that is a PyTorch Tensor of shape [N].
-            # Using item[-1] or np.asarray(item) doesn't work —
+            # Using item[-1] or np.asarray(item) doesn't work --
             # .audio is the correct attribute.
             audio = getattr(result, 'audio', None)
             if audio is None:
@@ -157,11 +163,22 @@ def generate_audio_kokoro(text, wav_path, context: str = "neutral") -> bool:
             return False
 
         combined = np.concatenate(chunks)
-        sf.write(wav_path, combined, samplerate=24000)
+
+        # PHASE 21: Prepend 120ms of leading silence to prevent first-word clipping.
+        # Kokoro generates audio with no leading silence. When MoviePy loads the WAV
+        # and composes it with the whoosh SFX, a sub-frame alignment offset can clip
+        # the very first phoneme. 120ms of silence gives the mixer a safe runway.
+        _SAMPLE_RATE = 24000
+        _LEAD_SILENCE_MS = 120
+        _lead_samples = int(_SAMPLE_RATE * _LEAD_SILENCE_MS / 1000)
+        _lead_silence = np.zeros(_lead_samples, dtype=np.float32)
+        combined = np.concatenate([_lead_silence, combined])
+
+        sf.write(wav_path, combined, samplerate=_SAMPLE_RATE)
         ok = os.path.exists(wav_path) and os.path.getsize(wav_path) > 1024
         if ok:
-            _dur_s = combined.shape[0] / 24000
-            print(f"[Kokoro] Audio saved ({_dur_s:.2f}s) -> {wav_path}")
+            _dur_s = combined.shape[0] / _SAMPLE_RATE
+            print(f"[Kokoro] Audio saved ({_dur_s:.2f}s incl. 120ms lead) -> {wav_path}")
             normalize_audio(wav_path)
             trim_audio_silence(wav_path)   # remove tail silence for tight scene transitions
         return ok
@@ -239,20 +256,20 @@ def generate_audio(text: str, index: int, context: str = "neutral") -> str | Non
     safe = hashlib.md5(text.encode()).hexdigest()[:8]
     wav_path = os.path.join(AUDIO_DIR, f"scene_{index:02d}_{safe}.wav")
 
-    # FORCE RE-GENERATION — no cache reuse
+    # FORCE RE-GENERATION -- no cache reuse
     if os.path.exists(wav_path):
         os.remove(wav_path)
 
     _active_voice = _CONTEXT_VOICE_MAP.get(context, _RUN_VOICE)
     print(f"[VoiceGen] Generating audio for scene {index}: {text[:60]}…")
-    _kokoro_status = "Y" if KOKORO_AVAILABLE else f"N — {_KOKORO_FAIL_REASON or 'not installed'}"
+    _kokoro_status = "Y" if KOKORO_AVAILABLE else f"N -- {_KOKORO_FAIL_REASON or 'not installed'}"
     print(f"[VoiceGen] Voice: '{_active_voice}' (context='{context}') | Kokoro={_kokoro_status}")
     if KOKORO_AVAILABLE:
         if generate_audio_kokoro(text, wav_path, context=context):
             print(f"[VoiceGen][Kokoro] Audio saved -> {wav_path}")
             return wav_path
 
-    print("[VoiceGen] Kokoro unavailable — falling back to Piper")
+    print("[VoiceGen] Kokoro unavailable -- falling back to Piper")
 
     if not _check_piper():
         return None
@@ -262,7 +279,7 @@ def generate_audio(text: str, index: int, context: str = "neutral") -> str | Non
     fragments = [f for f in fragments if f.strip()]
 
     if len(fragments) <= 1:
-        # Single fragment — use original logic
+        # Single fragment -- use original logic
         cmd = [
             PIPER_EXECUTABLE,
             "--model",       PIPER_MODEL,
@@ -282,7 +299,7 @@ def generate_audio(text: str, index: int, context: str = "neutral") -> str | Non
                 print(f"[VoiceGen] Piper error (rc={result.returncode}): {err}")
                 return None
         except FileNotFoundError:
-            print(f"[VoiceGen] Cannot execute '{PIPER_EXECUTABLE}' — not found.")
+            print(f"[VoiceGen] Cannot execute '{PIPER_EXECUTABLE}' -- not found.")
             return None
         except subprocess.TimeoutExpired:
             print("[VoiceGen] Piper timed out.")
@@ -300,7 +317,7 @@ def generate_audio(text: str, index: int, context: str = "neutral") -> str | Non
         return None
 
     else:
-        # Multiple fragments — generate each, insert pauses, merge
+        # Multiple fragments -- generate each, insert pauses, merge
         temp_wavs = []
         for i, frag in enumerate(fragments):
             frag_hash = hashlib.md5(frag.encode()).hexdigest()[:8]
@@ -426,7 +443,7 @@ def trim_audio_silence(wav_path: str,
     Uses ffmpeg silencedetect to find where speech ends, then trims
     keeping only `keep_tail_s` seconds of natural decay.
 
-    keep_tail_s=0.08: 80ms tail — enough for natural sentence ending,
+    keep_tail_s=0.08: 80ms tail -- enough for natural sentence ending,
     not enough to create perceivable pause before next scene.
 
     Returns True if file was modified, False if skipped.
@@ -463,9 +480,15 @@ def trim_audio_silence(wav_path: str,
     # Find last silence_end (= where speech stopped)
     _silence_ends = [float(m) for m in _re.findall(r"silence_end:\s*([\d.]+)", _stderr)]
     if not _silence_ends:
-        return False   # no silence detected — audio is speech throughout
+        return False   # no silence detected -- audio is speech throughout
 
     _speech_end = max(_silence_ends)
+    
+    # PHASE 20: Silence trimming safety checks
+    # Ensure we don't truncate very short audio, and only trim if speech ends at least 0.20s before physical end
+    if _total - _speech_end < 0.20 or _total < 1.20:
+        return False
+
     _trim_point = min(_speech_end + keep_tail_s, _total)
 
     # Only trim if we remove more than 0.15s
